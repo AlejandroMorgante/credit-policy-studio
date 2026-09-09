@@ -8,9 +8,12 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import __version__
-from .config import Settings, get_settings
-from .dependencies import get_policy_repository, get_scoring_service, get_warehouse
-from .invoker import VertexInvoker
+from .dependencies import (
+    get_policy_repository,
+    get_remote_invoker,
+    get_scoring_service,
+    get_warehouse,
+)
 from .models import CreditPolicy, PublishPolicyRequest, RunSummary, VertexPredictionRequest
 from .repositories import PolicyRepository
 from .service import ScoringService
@@ -23,7 +26,6 @@ app = FastAPI(
 )
 
 ScoringServiceDep = Annotated[ScoringService, Depends(get_scoring_service)]
-SettingsDep = Annotated[Settings, Depends(get_settings)]
 PolicyRepositoryDep = Annotated[PolicyRepository, Depends(get_policy_repository)]
 WarehouseDep = Annotated[Warehouse, Depends(get_warehouse)]
 
@@ -44,11 +46,13 @@ def health() -> dict[str, str]:
 
 
 @app.post("/predict", response_model=dict[str, list[RunSummary]])
+@app.post("/invocations", include_in_schema=False)
 def predict(
     request: VertexPredictionRequest,
     service: ScoringServiceDep,
 ) -> dict[str, list[RunSummary]]:
-    # Vertex requires an instances array even though rows are sourced from BigQuery.
+    # Vertex and SageMaker both require an instances array even though rows come
+    # from the warehouse. /invocations is the SageMaker container contract.
     # One request intentionally produces one auditable batch run.
     _ = request.instances
     return {"predictions": [service.run(request.parameters)]}
@@ -58,12 +62,12 @@ def predict(
 def create_run(
     request: VertexPredictionRequest,
     service: ScoringServiceDep,
-    settings: SettingsDep,
 ) -> RunSummary:
     # The localhost POC becomes a thin authenticated facade when an endpoint is configured.
     # With no endpoint it falls back to the in-memory demo for contributors and CI.
-    if settings.vertex_endpoint_id:
-        return VertexInvoker(settings).run(request.parameters)
+    invoker = get_remote_invoker()
+    if invoker is not None:
+        return invoker.run(request.parameters)
     return service.run(request.parameters)
 
 

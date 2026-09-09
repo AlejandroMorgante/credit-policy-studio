@@ -9,8 +9,13 @@ VENV := .venv
 PYTHON := $(VENV)/bin/python
 PIP := $(VENV)/bin/pip
 IMAGE ?= $(REGION)-docker.pkg.dev/$(PROJECT_ID)/credit-policy/credit-policy-studio:dev
+AWS_IMAGE_TAG ?= dev
 
-.PHONY: help setup fmt lint test run docker-build tf-init tf-plan infra-core image infra deploy-model seed upload-policy clean
+AWS_TF_DIR := infra/aws
+AWS_REGION ?= us-east-1
+
+.PHONY: help setup fmt lint test run docker-build tf-init tf-plan infra-core image infra deploy-model seed upload-policy clean \
+	aws-tf-init aws-tf-plan aws-infra aws-image aws-deploy-endpoint aws-delete-endpoint aws-seed aws-upload-policy
 
 help: ## Show available commands.
 	@awk 'BEGIN {FS = ":.*## "; printf "\nCredit Policy Studio\n\n"} /^[a-zA-Z_-]+:.*## / {printf "  %-18s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -23,12 +28,15 @@ setup: ## Create a local virtual environment and install development dependencie
 fmt: ## Format Python and Terraform files.
 	$(VENV)/bin/ruff format .
 	terraform -chdir=$(TF_DIR) fmt -recursive
+	terraform -chdir=$(AWS_TF_DIR) fmt -recursive
 
 lint: ## Run static checks.
 	$(VENV)/bin/ruff format --check .
 	$(VENV)/bin/ruff check .
 	terraform -chdir=$(TF_DIR) fmt -check -recursive
 	terraform -chdir=$(TF_DIR) validate
+	terraform -chdir=$(AWS_TF_DIR) fmt -check -recursive
+	terraform -chdir=$(AWS_TF_DIR) validate
 
 test: ## Run unit and API tests.
 	$(VENV)/bin/pytest --cov=credit_policy_studio --cov-report=term-missing
@@ -64,6 +72,37 @@ seed: ## Populate the sample applicants table.
 
 upload-policy: ## Upload the sample policy and activate it atomically.
 	PROJECT_ID=$(PROJECT_ID) ./scripts/publish_policy.sh policies/credit_policy_v1.json
+
+aws-tf-init: ## Initialize the AWS Terraform root.
+	terraform -chdir=$(AWS_TF_DIR) init
+
+aws-tf-plan: ## Plan AWS infrastructure without changing it.
+	terraform -chdir=$(AWS_TF_DIR) plan -var="region=$(AWS_REGION)"
+
+aws-infra: ## Create S3, Glue tables, Athena workgroup, ECR, and the runtime IAM role.
+	terraform -chdir=$(AWS_TF_DIR) apply -var="region=$(AWS_REGION)"
+
+aws-image: ## Build the runtime image and push it to ECR.
+	$(eval ECR := $(shell terraform -chdir=$(AWS_TF_DIR) output -raw ecr_repository_url))
+	aws ecr get-login-password --region $(AWS_REGION) | docker login --username AWS --password-stdin $(firstword $(subst /, ,$(ECR)))
+	docker build -t $(ECR):$(AWS_IMAGE_TAG) .
+	docker push $(ECR):$(AWS_IMAGE_TAG)
+	@echo "Pushed $(ECR):$(AWS_IMAGE_TAG)"
+
+aws-deploy-endpoint: ## Create or update the billable SageMaker endpoint.
+	$(eval ECR := $(shell terraform -chdir=$(AWS_TF_DIR) output -raw ecr_repository_url))
+	terraform -chdir=$(AWS_TF_DIR) apply -var="region=$(AWS_REGION)" -var="deploy_endpoint=true" -var="container_image=$(ECR):$(AWS_IMAGE_TAG)"
+
+aws-delete-endpoint: ## Tear down the SageMaker endpoint and stop its hourly cost.
+	terraform -chdir=$(AWS_TF_DIR) apply -var="region=$(AWS_REGION)" -var="deploy_endpoint=false"
+
+aws-seed: ## Upload the synthetic applicant cohort to S3.
+	AWS_REGION=$(AWS_REGION) DATA_BUCKET=$(shell terraform -chdir=$(AWS_TF_DIR) output -raw data_bucket) \
+		$(PYTHON) scripts/aws_setup.py seed
+
+aws-upload-policy: ## Upload the sample policy to S3 and activate it.
+	AWS_REGION=$(AWS_REGION) POLICY_BUCKET=$(shell terraform -chdir=$(AWS_TF_DIR) output -raw policy_bucket) \
+		$(PYTHON) scripts/aws_setup.py publish policies/credit_policy_v1.json
 
 clean: ## Remove local caches and build outputs only.
 	find . -type d -name __pycache__ -prune -exec rm -rf {} +

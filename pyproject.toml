@@ -21,8 +21,13 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+aws = [
+  "boto3>=1.35,<2",
+]
 dev = [
+  "boto3>=1.35,<2",
   "httpx>=0.28,<1",
+  "moto[s3]>=5.1,<6",
   "pytest>=8.4,<9",
   "pytest-cov>=6.2,<7",
   "ruff>=0.12,<1",

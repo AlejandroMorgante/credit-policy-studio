@@ -95,3 +95,23 @@ def test_dashboard_uses_one_run_instead_of_accumulating() -> None:
         "run-large",
         "run-small",
     ]
+
+
+def test_sagemaker_invocations_route_shares_the_predict_contract() -> None:
+    from pathlib import Path
+
+    policy = Path(__file__).parents[1] / "policies" / "credit_policy_v1.json"
+    warehouse = MemoryWarehouse()
+    policies = LocalPolicyRepository(policy)
+    app.dependency_overrides[get_scoring_service] = lambda: ScoringService(policies, warehouse)
+
+    try:
+        response = TestClient(app).post(
+            "/invocations",
+            json={"instances": [{}], "parameters": {"limit": 2}},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["predictions"][0]["processed_rows"] == 2

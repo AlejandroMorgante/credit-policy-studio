@@ -166,6 +166,35 @@ until undeployed. Terraform protects BigQuery tables by default and does not mak
 The operator applying Terraform needs permission to enable APIs and create the resources above; the
 operator deploying the model must also be allowed to use the Vertex runtime service account.
 
+## Provision the AWS side
+
+The same application runs on AWS. `CLOUD_PROVIDER=aws` swaps Cloud Storage for S3, BigQuery for
+Athena over the Glue Data Catalog, and Vertex AI for a SageMaker real-time endpoint. Nothing in the
+decision engine, the API, or the UI changes. Credentials come from the standard AWS chain (SSO
+profile, environment, or instance role); the repository stores none.
+
+```bash
+aws sso login                # or export AWS_PROFILE / AWS_ACCESS_KEY_ID
+export AWS_REGION=us-east-1
+
+make aws-tf-init
+make aws-tf-plan             # read the plan before creating resources
+make aws-infra               # S3, Glue tables, Athena workgroup, ECR, runtime IAM role
+make aws-upload-policy
+make aws-seed
+make aws-image
+make aws-deploy-endpoint     # creates the billable SageMaker endpoint
+make aws-delete-endpoint     # tears it down again
+```
+
+The SageMaker endpoint is the only always-on cost and is disabled by default
+(`deploy_endpoint=false`). Everything else is pay-per-use: Athena bills per byte scanned and S3 per
+stored object. Point the local UI at the endpoint with `CLOUD_PROVIDER=aws`, `POLICY_BUCKET`,
+`DATA_BUCKET`, and `SAGEMAKER_ENDPOINT_NAME` in `.env`.
+
+See [the AWS port](docs/aws-port.md) for the service mapping, the BigQuery-to-Trino SQL
+translation, and the S3 conditional-write equivalents of GCS object generations.
+
 ## Future: expose the UI with Cloud Run
 
 The Terraform configuration can later expose the same UI/API image through authenticated Cloud Run.
@@ -185,14 +214,15 @@ browser code.
 ## Repository map
 
 ```text
-src/credit_policy_studio/   Python engine, repositories, BigQuery adapter, API, Vertex client
+src/credit_policy_studio/   Python engine, API, and the GCP and AWS adapters
 policies/                   Example versioned decision policy
 web/                        Visual editor and impact dashboard
-infra/                      Terraform and BigQuery schemas
+infra/                      Terraform for GCP and BigQuery schemas
+infra/aws/                  Terraform for S3, Glue, Athena, ECR, and SageMaker
 sql/                        Synthetic applicant seed
 scripts/                    Policy publication, model deployment, invocation
-tests/                      Engine and Vertex contract tests
-docs/                       Architecture and data contract
+tests/                      Engine, API, and cloud adapter tests
+docs/                       Architecture, data contract, and the AWS port
 ```
 
 Read [the architecture](docs/architecture.md) for trust boundaries and the production evolution,

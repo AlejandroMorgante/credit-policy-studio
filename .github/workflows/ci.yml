@@ -51,10 +51,16 @@ jobs:
         uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
 
       - name: Check Terraform formatting
-        run: terraform -chdir=infra fmt -check -recursive
+        run: |
+          terraform -chdir=infra fmt -check -recursive
+          terraform -chdir=infra/aws fmt -check -recursive
 
       - name: Initialize Terraform
-        run: terraform -chdir=infra init -backend=false
+        run: |
+          terraform -chdir=infra init -backend=false
+          terraform -chdir=infra/aws init -backend=false
 
       - name: Validate Terraform
-        run: terraform -chdir=infra validate
+        run: |
+          terraform -chdir=infra validate
+          terraform -chdir=infra/aws validate
