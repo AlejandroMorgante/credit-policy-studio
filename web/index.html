@@ -6,7 +6,7 @@
     <meta name="color-scheme" content="light" />
     <meta name="description" content="Diseñá, versioná y explicá políticas de crédito sin tocar código." />
     <title>Credit Policy Studio</title>
-    <link rel="stylesheet" href="/assets/styles.css?v=3" />
+    <link rel="stylesheet" href="/assets/styles.css?v=4" />
   </head>
   <body data-mode="edit">
     <div class="shell">
@@ -39,11 +39,22 @@
             <span class="version-pill" id="version-pill"><i></i> Borrador</span>
             <button class="button promote" id="promote-button" type="button" hidden>Promover a productiva</button>
             <button class="button secondary" id="validate-button">Validar</button>
-            <button class="button primary" id="publish-button">Guardar versión</button>
+            <button class="button primary" id="publish-button">Crear nueva versión</button>
           </div>
         </header>
 
         <section class="content">
+          <div class="editor-summary" aria-label="Contexto de edición">
+            <div class="editor-version-picker">
+              <label for="editor-version-select">VERSIÓN A EDITAR</label>
+              <select id="editor-version-select" aria-label="Versión a editar"></select>
+              <small id="editor-version-kind">Sincronizando…</small>
+            </div>
+            <div class="editor-guidance" id="editor-guidance">
+              <strong>Candidata editable</strong>
+              <span>Aplicar guarda el cambio en esta versión. Producción no se modifica.</span>
+            </div>
+          </div>
           <div class="impact-summary" aria-label="Resumen de impacto">
             <div class="impact-intro"><label for="version-select">VERSIÓN A EVALUAR</label><select id="version-select" aria-label="Versión a evaluar"></select><small id="version-kind">Sincronizando…</small></div>
             <article class="metric-card"><span>Analizadas</span><strong id="metric-total">—</strong><small>esta corrida</small></article>
@@ -89,7 +100,7 @@
                   <label>Decisión<select id="node-decision"><option>APPROVED</option><option>REVIEW</option><option>REJECTED</option></select></label>
                   <div class="field-row"><label>Banda<input id="node-band" /></label><label>Límite<input id="node-limit" type="number" min="0" /></label></div>
                 </div>
-                <button class="button full apply-button" type="submit">Aplicar al borrador</button>
+                <button class="button full apply-button" type="submit">Aplicar cambios</button>
               </form>
               <div class="run-panel">
                 <div><span class="panel-kicker">PRUEBA CONTROLADA</span><strong>Ejecutar evaluación</strong><p>Procesa el dataset con la versión seleccionada.</p><small class="run-context" id="run-context">Sin ejecución seleccionada</small></div>
@@ -116,8 +127,8 @@
       <p class="panel-kicker">GUÍA DEL LABORATORIO</p><h2>De una regla a una decisión productiva</h2>
       <p class="help-intro">Probá cambios sin afectar consumidores y promovelos sólo cuando el resultado sea el esperado.</p>
       <ol class="guide-steps">
-        <li><span>1</span><div><strong>Editá una regla</strong><p>En Política, seleccioná un nodo, cambiá sus campos y elegí <b>Aplicar al borrador</b>. Esto sólo modifica el workspace del navegador.</p></div></li>
-        <li><span>2</span><div><strong>Validá y creá una versión</strong><p>Validá el árbol y asignale una versión única. Crear la versión no cambia producción.</p></div></li>
+        <li><span>1</span><div><strong>Elegí la versión a editar</strong><p>En Política, seleccioná una candidata. La productiva puede inspeccionarse, pero está bloqueada.</p></div></li>
+        <li><span>2</span><div><strong>Aplicá cada cambio</strong><p>Editá una regla y elegí <b>Aplicar cambios</b>. El cambio queda guardado en esa misma candidata.</p></div></li>
         <li><span>3</span><div><strong>Evaluá una versión</strong><p>En Evaluación, elegí una versión y ejecutala contra el dataset. Los resultados pertenecen sólo a esa corrida.</p></div></li>
         <li><span>4</span><div><strong>Leé el recorrido</strong><p>Los números sobre las ramas muestran cuántos usuarios siguieron cada camino.</p></div></li>
         <li><span>5</span><div><strong>Promové a productiva</strong><p>Cuando estés conforme, promovela. Desde entonces será la versión usada por consumidores que no indiquen otra.</p></div></li>
@@ -140,6 +151,6 @@
         <menu><button class="button secondary" value="cancel">Cancelar</button><button class="button primary" id="confirm-publish" value="default">Guardar versión</button></menu>
       </form>
     </dialog>
-    <script src="/assets/app.js?v=17" defer></script>
+    <script src="/assets/app.js?v=18" defer></script>
   </body>
 </html>

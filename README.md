@@ -64,9 +64,10 @@ API key, service-account key, or public web endpoint is created for the current 
 
 The product behaves as a small policy laboratory:
 
-1. Edit rules in **Política** and apply them to the browser draft.
-2. Validate and create a candidate version. Iterate on that candidate without changing its business
-   version; each saved revision remains addressable by its SHA-256. Production does not change.
+1. In **Política**, explicitly select the **Versión a editar**. Productive versions are visible but
+   read-only; create a candidate before changing one.
+2. Edit a rule and apply it. Each apply persists to that same candidate and creates an addressable
+   SHA-256 revision without changing production.
 3. Open **Evaluación**, select any version, and run it against the test dataset.
 4. Browse all runs for that version and inspect one at a time. Dashboard figures are filtered by
    `run_id` and never accumulate multiple runs in the visible result.
@@ -75,10 +76,10 @@ The product behaves as a small policy laboratory:
 
 The `?` button in the application opens the same flow as an in-product quick guide. See the complete
 [business-user guide](docs/user-guide.md), including rollback semantics and the distinction between
-applying a draft, creating a version, evaluating it, and promoting it.
+editing a candidate, creating a version, evaluating it, and promoting it.
 
 The **Versiones** library lists every policy and its Productiva/Candidata state. Candidates can be
-updated repeatedly; productive versions are frozen. Evaluation
+updated repeatedly through the explicit editor selector; productive versions are frozen. Evaluation
 also lists every run for the selected version; choosing a run filters the dashboard by its exact
 `run_id`. Switching versions never overwrites the in-progress editor workspace.
 
