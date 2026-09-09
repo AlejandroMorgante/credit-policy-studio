@@ -66,13 +66,13 @@ locals {
 
 resource "aws_s3_bucket" "policies" {
   bucket        = local.policy_bucket
-  force_destroy = var.force_destroy_buckets
+  force_destroy = var.force_destroy
   tags          = local.tags
 }
 
 resource "aws_s3_bucket" "data" {
   bucket        = local.data_bucket
-  force_destroy = var.force_destroy_buckets
+  force_destroy = var.force_destroy
   tags          = local.tags
 }
 
@@ -265,9 +265,11 @@ resource "aws_glue_catalog_table" "scoring_runs" {
 }
 
 resource "aws_athena_workgroup" "studio" {
-  name  = var.name_prefix
-  state = "ENABLED"
-  tags  = local.tags
+  name = var.name_prefix
+  # Without this, destroy fails once the workgroup holds any query history.
+  force_destroy = var.force_destroy
+  state         = "ENABLED"
+  tags          = local.tags
 
   configuration {
     enforce_workgroup_configuration    = true

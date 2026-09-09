@@ -9,4 +9,4 @@ name_prefix = "credit-policy-studio"
 # container_image        = "123456789012.dkr.ecr.us-east-1.amazonaws.com/credit-policy-studio:v1"
 deploy_endpoint        = false
 endpoint_instance_type = "ml.t2.medium"
-force_destroy_buckets  = false
+force_destroy          = false

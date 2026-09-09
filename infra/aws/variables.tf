@@ -46,8 +46,8 @@ variable "endpoint_instance_type" {
   default     = "ml.t2.medium"
 }
 
-variable "force_destroy_buckets" {
-  description = "Allow Terraform to delete non-empty buckets. Unsafe outside a throwaway POC."
+variable "force_destroy" {
+  description = "Allow Terraform to delete non-empty buckets and the Athena workgroup's query history. Unsafe outside a throwaway POC."
   type        = bool
   default     = false
 }
