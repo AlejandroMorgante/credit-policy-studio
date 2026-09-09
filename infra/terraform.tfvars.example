@@ -7,3 +7,6 @@ allow_unauthenticated_ui = false
 
 # Set after `make image`, then enable deploy_ui if desired.
 # container_image = "us-central1-docker.pkg.dev/your-project-id/credit-policy/credit-policy-studio:v1"
+
+# Keep false outside disposable environments. `make infra` overrides this for the POC.
+# force_destroy_data = false

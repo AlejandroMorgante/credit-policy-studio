@@ -18,6 +18,7 @@ gcloud ai models upload \
   --project="${PROJECT_ID}" \
   --region="${REGION}" \
   --display-name="${display_name}" \
+  --labels="application=credit-policy-studio" \
   --container-image-uri="${IMAGE}" \
   --container-health-route="/health" \
   --container-predict-route="/predict" \

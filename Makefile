@@ -9,8 +9,13 @@ VENV := .venv
 PYTHON := $(VENV)/bin/python
 PIP := $(VENV)/bin/pip
 IMAGE ?= $(REGION)-docker.pkg.dev/$(PROJECT_ID)/credit-policy/credit-policy-studio:dev
+POC_DESTROYABLE ?= true
+TF_VARS := -var="project_id=$(PROJECT_ID)" -var="region=$(REGION)" -var="bigquery_location=$(BQ_LOCATION)"
+ifeq ($(POC_DESTROYABLE),true)
+TF_VARS += -var="deletion_protection=false" -var="force_destroy_data=true"
+endif
 
-.PHONY: help setup fmt lint test run docker-build tf-init tf-plan infra-core image infra deploy-model seed upload-policy clean
+.PHONY: help setup fmt lint test run docker-build tf-init tf-plan infra-core image infra deploy-model seed upload-policy destroy clean
 
 help: ## Show available commands.
 	@awk 'BEGIN {FS = ":.*## "; printf "\nCredit Policy Studio\n\n"} /^[a-zA-Z_-]+:.*## / {printf "  %-18s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -44,14 +49,15 @@ tf-init: ## Initialize Terraform.
 
 tf-plan: ## Plan GCP infrastructure without changing it.
 	test -n "$(PROJECT_ID)" || (echo "PROJECT_ID is required" && exit 1)
-	terraform -chdir=$(TF_DIR) plan -var="project_id=$(PROJECT_ID)" -var="region=$(REGION)" -var="bigquery_location=$(BQ_LOCATION)"
+	terraform -chdir=$(TF_DIR) plan $(TF_VARS)
 
 infra-core: ## Create APIs, BigQuery, GCS, Artifact Registry, IAM, and Vertex endpoint.
 	test -n "$(PROJECT_ID)" || (echo "PROJECT_ID is required" && exit 1)
-	terraform -chdir=$(TF_DIR) apply -var="project_id=$(PROJECT_ID)" -var="region=$(REGION)" -var="bigquery_location=$(BQ_LOCATION)"
+	terraform -chdir=$(TF_DIR) apply $(TF_VARS)
 
 image: ## Build and push the image with Cloud Build.
-	gcloud builds submit --project=$(PROJECT_ID) --region=$(REGION) --tag=$(IMAGE) .
+	policy_bucket="$$(terraform -chdir=$(TF_DIR) output -raw policy_bucket)"; \
+	gcloud builds submit --project=$(PROJECT_ID) --region=$(REGION) --tag=$(IMAGE) --gcs-source-staging-dir="gs://$${policy_bucket}/cloud-build/source" .
 
 infra: infra-core image ## Provision core infrastructure and publish the image.
 	@echo "Core infrastructure and image are ready. Run 'make deploy-model'."
@@ -64,6 +70,9 @@ seed: ## Populate the sample applicants table.
 
 upload-policy: ## Upload the sample policy and activate it atomically.
 	PROJECT_ID=$(PROJECT_ID) ./scripts/publish_policy.sh policies/credit_policy_v1.json
+
+destroy: ## Remove all billable resources created by this POC. Requires exact project confirmation.
+	PROJECT_ID=$(PROJECT_ID) REGION=$(REGION) BQ_LOCATION=$(BQ_LOCATION) CONFIRM_DESTROY=$(CONFIRM_DESTROY) ./scripts/destroy_poc.sh
 
 clean: ## Remove local caches and build outputs only.
 	find . -type d -name __pycache__ -prune -exec rm -rf {} +

@@ -49,3 +49,9 @@ variable "deletion_protection" {
   type        = bool
   default     = true
 }
+
+variable "force_destroy_data" {
+  description = "Allow Terraform to remove non-empty POC BigQuery datasets and policy buckets."
+  type        = bool
+  default     = false
+}

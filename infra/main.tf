@@ -42,7 +42,7 @@ resource "google_storage_bucket" "policies" {
   location                    = var.region
   uniform_bucket_level_access = true
   public_access_prevention    = "enforced"
-  force_destroy               = false
+  force_destroy               = var.force_destroy_data
 
   versioning {
     enabled = true
@@ -67,7 +67,7 @@ resource "google_bigquery_dataset" "credit_policy" {
   friendly_name              = "Credit Policy Studio"
   description                = "Inputs, auditable scoring outputs, and execution metadata."
   location                   = var.bigquery_location
-  delete_contents_on_destroy = false
+  delete_contents_on_destroy = var.force_destroy_data
   max_time_travel_hours      = 168
 
   labels = {

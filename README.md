@@ -101,6 +101,26 @@ Open <http://localhost:8080>. Without `VERTEX_ENDPOINT_ID`, local mode uses eigh
 applicants. Edit a threshold, create a candidate version, open **Evaluación**, select it, run the
 dataset, and promote it only if the result is acceptable.
 
+## Disposable POC lifecycle
+
+The Makefile creates the POC with BigQuery deletion protection disabled and permits Terraform to
+empty the application-owned bucket and dataset during teardown. This behavior is intentionally
+limited to disposable environments; run with `POC_DESTROYABLE=false` to retain the safer Terraform
+defaults.
+
+To remove the complete application stack, including deployed Vertex models that are created outside
+Terraform, provide the exact project ID as a guard:
+
+```bash
+make destroy PROJECT_ID=your-project-id CONFIRM_DESTROY=your-project-id
+```
+
+The command undeploys models from the Terraform-managed endpoint, deletes Vertex models labelled for
+this application, and then destroys the endpoint, Artifact Registry repository and images, BigQuery
+tables and dataset, versioned policy bucket, service accounts, and IAM grants. Required project APIs
+remain enabled because they may be shared by other workloads; Cloud Build history and provider audit
+logs follow their normal GCP retention policies.
+
 To use the real POC flow from localhost, create an ignored `.env` from `.env.example` and set:
 
 ```dotenv
