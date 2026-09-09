@@ -1,0 +1,9 @@
+[
+  {"name":"user_id","type":"STRING","mode":"REQUIRED","description":"Synthetic user identifier."},
+  {"name":"score_1","type":"FLOAT","mode":"REQUIRED","description":"Fictitious bureau score (300-850)."},
+  {"name":"score_2","type":"FLOAT","mode":"REQUIRED","description":"Fictitious affordability score (0-100)."},
+  {"name":"score_3","type":"FLOAT","mode":"REQUIRED","description":"Fictitious behavioral score (0-100)."},
+  {"name":"variable_1","type":"FLOAT","mode":"REQUIRED","description":"Fictitious monthly income."},
+  {"name":"variable_2","type":"FLOAT","mode":"REQUIRED","description":"Fictitious monthly debt."},
+  {"name":"variable_3","type":"FLOAT","mode":"REQUIRED","description":"Fictitious employment tenure in months."}
+]

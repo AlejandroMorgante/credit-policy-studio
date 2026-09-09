@@ -1,0 +1,12 @@
+[
+  {"name":"run_id","type":"STRING","mode":"REQUIRED"},
+  {"name":"policy_id","type":"STRING","mode":"REQUIRED"},
+  {"name":"policy_version","type":"STRING","mode":"REQUIRED"},
+  {"name":"policy_sha256","type":"STRING","mode":"REQUIRED"},
+  {"name":"processed_rows","type":"INTEGER","mode":"REQUIRED"},
+  {"name":"persisted_rows","type":"INTEGER","mode":"REQUIRED"},
+  {"name":"decisions","type":"JSON","mode":"REQUIRED"},
+  {"name":"started_at","type":"TIMESTAMP","mode":"REQUIRED"},
+  {"name":"completed_at","type":"TIMESTAMP","mode":"REQUIRED"},
+  {"name":"duration_ms","type":"INTEGER","mode":"REQUIRED"}
+]

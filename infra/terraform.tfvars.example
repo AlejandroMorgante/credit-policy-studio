@@ -1,0 +1,9 @@
+project_id             = "your-project-id"
+region                 = "us-central1"
+bigquery_location      = "US"
+deletion_protection    = true
+deploy_ui              = false
+allow_unauthenticated_ui = false
+
+# Set after `make image`, then enable deploy_ui if desired.
+# container_image = "us-central1-docker.pkg.dev/your-project-id/credit-policy/credit-policy-studio:v1"

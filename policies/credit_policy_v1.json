@@ -1,0 +1,119 @@
+{
+  "schema_version": "1.0",
+  "metadata": {
+    "policy_id": "consumer-credit-poc",
+    "version": "2026-09-09.1",
+    "name": "Política cálida de crédito",
+    "description": "Árbol ficticio para demostrar versionado, explicabilidad y análisis de flujo.",
+    "created_at": "2026-09-09T12:00:00Z",
+    "created_by": "policy-team@example.com",
+    "status": "active"
+  },
+  "root_node": "bureau-floor",
+  "nodes": {
+    "bureau-floor": {
+      "id": "bureau-floor",
+      "type": "condition",
+      "label": "Score de buró ≥ 560",
+      "field": "score_1",
+      "operator": "gte",
+      "value": 560,
+      "true_node": "affordability",
+      "false_node": "reject-bureau"
+    },
+    "affordability": {
+      "id": "affordability",
+      "type": "condition",
+      "label": "Score de capacidad ≥ 55",
+      "field": "score_2",
+      "operator": "gte",
+      "value": 55,
+      "true_node": "behavior",
+      "false_node": "review-affordability"
+    },
+    "behavior": {
+      "id": "behavior",
+      "type": "condition",
+      "label": "Score de comportamiento ≥ 70",
+      "field": "score_3",
+      "operator": "gte",
+      "value": 70,
+      "true_node": "income",
+      "false_node": "review-behavior"
+    },
+    "income": {
+      "id": "income",
+      "type": "condition",
+      "label": "Ingreso mensual ≥ 3.500",
+      "field": "variable_1",
+      "operator": "gte",
+      "value": 3500,
+      "true_node": "tenure",
+      "false_node": "approve-starter"
+    },
+    "tenure": {
+      "id": "tenure",
+      "type": "condition",
+      "label": "Antigüedad laboral ≥ 24 meses",
+      "field": "variable_3",
+      "operator": "gte",
+      "value": 24,
+      "true_node": "approve-prime",
+      "false_node": "approve-standard"
+    },
+    "reject-bureau": {
+      "id": "reject-bureau",
+      "type": "decision",
+      "label": "Rechazo por buró",
+      "decision": "REJECTED",
+      "risk_band": "E",
+      "credit_limit": 0,
+      "reason_code": "BUREAU_SCORE_BELOW_POLICY"
+    },
+    "review-affordability": {
+      "id": "review-affordability",
+      "type": "decision",
+      "label": "Revisión de capacidad",
+      "decision": "REVIEW",
+      "risk_band": "D",
+      "credit_limit": 0,
+      "reason_code": "AFFORDABILITY_REVIEW"
+    },
+    "review-behavior": {
+      "id": "review-behavior",
+      "type": "decision",
+      "label": "Revisión de comportamiento",
+      "decision": "REVIEW",
+      "risk_band": "C",
+      "credit_limit": 1000,
+      "reason_code": "BEHAVIOR_REVIEW"
+    },
+    "approve-starter": {
+      "id": "approve-starter",
+      "type": "decision",
+      "label": "Aprobación inicial",
+      "decision": "APPROVED",
+      "risk_band": "C",
+      "credit_limit": 1500,
+      "reason_code": "STARTER_LIMIT"
+    },
+    "approve-standard": {
+      "id": "approve-standard",
+      "type": "decision",
+      "label": "Aprobación estándar",
+      "decision": "APPROVED",
+      "risk_band": "B",
+      "credit_limit": 4000,
+      "reason_code": "STANDARD_LIMIT"
+    },
+    "approve-prime": {
+      "id": "approve-prime",
+      "type": "decision",
+      "label": "Aprobación prime",
+      "decision": "APPROVED",
+      "risk_band": "A",
+      "credit_limit": 9000,
+      "reason_code": "PRIME_LIMIT"
+    }
+  }
+}

@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    name: Python quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+
+      - name: Install uv and Python
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      - name: Install locked dependencies
+        run: uv sync --frozen --all-extras
+
+      - name: Check formatting with Ruff
+        run: uv run --frozen ruff format --check .
+
+      - name: Lint with Ruff
+        run: uv run --frozen ruff check --output-format=github .
+
+      - name: Run tests
+        run: uv run --frozen pytest --cov=credit_policy_studio --cov-report=term-missing
+
+  terraform:
+    name: Terraform quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+
+      - name: Install Terraform
+        uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
+
+      - name: Check Terraform formatting
+        run: terraform -chdir=infra fmt -check -recursive
+
+      - name: Initialize Terraform
+        run: terraform -chdir=infra init -backend=false
+
+      - name: Validate Terraform
+        run: terraform -chdir=infra validate
