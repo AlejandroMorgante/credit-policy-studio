@@ -67,7 +67,7 @@ not required to demonstrate the current flow.
 | Scheduler / Job runtime | Would automate or decouple large recurring cohorts later. | No |
 
 Terraform also enables the required service APIs. It creates an empty Vertex endpoint, but the
-billable serving replica is created only by `make deploy-model`. No VPC, load balancer, database,
+billable serving replica is created only by `make deploy`. No VPC, load balancer, database,
 API key, service-account key, or public web endpoint is created for the current POC.
 
 > [!WARNING]
@@ -220,12 +220,12 @@ export PROJECT_ID=YOUR_PROJECT_ID
 export REGION=us-central1
 
 make tf-init
-make tf-plan                # read the plan before creating resources
-make infra-core             # APIs, IAM, GCS, BigQuery, Artifact Registry, endpoint
+make plan                   # read the plan before creating resources
+make infra                  # APIs, IAM, GCS, BigQuery, Artifact Registry, endpoint
 make upload-policy
 make seed
 make image
-make deploy-model           # creates billable Vertex serving replicas
+make deploy                 # creates billable Vertex serving replicas
 ./scripts/invoke_vertex.sh 100
 ```
 
@@ -236,7 +236,8 @@ operator deploying the model must also be allowed to use the Vertex runtime serv
 
 ## Provision the AWS side
 
-The same application runs on AWS. `CLOUD_PROVIDER=aws` swaps Cloud Storage for S3, BigQuery for
+Every infrastructure target takes `CLOUD=gcp` (the default) or `CLOUD=aws`, so the same commands
+provision either cloud. The application runs on AWS with `CLOUD_PROVIDER=aws`, which swaps Cloud Storage for S3, BigQuery for
 Athena over the Glue Data Catalog, and Vertex AI for a SageMaker real-time endpoint. Nothing in the
 decision engine, the API, or the UI changes. Credentials come from the standard AWS chain (SSO
 profile, environment, or instance role); the repository stores none.
@@ -245,14 +246,16 @@ profile, environment, or instance role); the repository stores none.
 aws sso login                # or export AWS_PROFILE / AWS_ACCESS_KEY_ID
 export AWS_REGION=us-east-1
 
-make aws-tf-init
-make aws-tf-plan             # read the plan before creating resources
-make aws-infra               # S3, Glue tables, Athena workgroup, ECR, runtime IAM role
-make aws-upload-policy
-make aws-seed
-make aws-image
-make aws-deploy-endpoint     # creates the billable SageMaker endpoint
-make aws-delete-endpoint     # tears it down again
+export CLOUD=aws              # every infrastructure target reads this
+
+make tf-init
+make plan                    # read the plan before creating resources
+make infra                   # S3, Glue tables, Athena workgroup, ECR, runtime IAM role
+make upload-policy
+make seed
+make image
+make deploy                  # creates the SageMaker endpoint
+make undeploy                # removes it again
 ```
 
 The SageMaker endpoint is the only always-on cost (about USD 74 per month on `ml.c6i.large`) and is
@@ -272,7 +275,7 @@ and dashboard loads — scanned 101 KB across 16 queries and cost well under a c
 To remove every AWS resource, mirroring `make destroy` on the GCP side:
 
 ```bash
-make aws-destroy
+make destroy CLOUD=aws
 ```
 
 Terraform reads `force_destroy` from state rather than from the destroy invocation, so the target
