@@ -6,7 +6,7 @@
     <meta name="color-scheme" content="light" />
     <meta name="description" content="Diseñá, versioná y explicá políticas de crédito sin tocar código." />
     <title>Credit Policy Studio</title>
-    <link rel="stylesheet" href="/assets/styles.css?v=4" />
+    <link rel="stylesheet" href="/assets/styles.css?v=5" />
   </head>
   <body data-mode="edit">
     <div class="shell">
@@ -61,6 +61,7 @@
             <article class="metric-card approved"><span>Aprobadas</span><strong id="metric-approved">—</strong><small id="approved-share">sin ejecuciones</small></article>
             <article class="metric-card review"><span>Revisión manual</span><strong id="metric-review">—</strong><small id="review-share">sin ejecuciones</small></article>
             <article class="metric-card rejected"><span>Rechazadas</span><strong id="metric-rejected">—</strong><small id="rejected-share">sin ejecuciones</small></article>
+            <div class="metrics-loading" id="metrics-loading" role="status" aria-live="polite" hidden><span class="spinner" aria-hidden="true"></span><span id="metrics-loading-label">Actualizando métricas…</span></div>
           </div>
 
           <div class="workspace-grid">
@@ -106,6 +107,7 @@
                 <div><span class="panel-kicker">PRUEBA CONTROLADA</span><strong>Ejecutar evaluación</strong><p>Procesa el dataset con la versión seleccionada.</p><small class="run-context" id="run-context">Sin ejecución seleccionada</small></div>
                 <label>Corrida visible<select id="run-select" aria-label="Corrida visible"><option value="">Sin corridas</option></select></label>
                 <label class="compact-label">Usuarios<input id="run-limit" type="number" value="100" min="1" max="10000" /></label>
+                <div class="operation-status" id="evaluation-status" role="status" aria-live="polite" hidden><span class="spinner" aria-hidden="true"></span><div><strong id="evaluation-status-title">Preparando evaluación…</strong><small id="evaluation-status-detail">Validando la versión y el dataset.</small></div></div>
                 <button class="button dark full" id="run-button" type="button"><svg viewBox="0 0 24 24"><path d="m9 7 8 5-8 5z"/></svg> Iniciar evaluación</button>
               </div>
             </aside>
@@ -151,6 +153,6 @@
         <menu><button class="button secondary" value="cancel">Cancelar</button><button class="button primary" id="confirm-publish" value="default">Guardar versión</button></menu>
       </form>
     </dialog>
-    <script src="/assets/app.js?v=18" defer></script>
+    <script src="/assets/app.js?v=19" defer></script>
   </body>
 </html>

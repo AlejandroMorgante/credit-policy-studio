@@ -10,6 +10,7 @@ const state = {
   editorDraft: null,
   editorSelected: null,
   pendingPromotionVersion: null,
+  dashboardRequest: 0,
 };
 const viewportState = {
   x: 0,
@@ -302,13 +303,57 @@ function updateMetrics(data) {
     : "Esta versión todavía no tiene una corrida";
 }
 
+function setMetricsLoading(loading, label = "Actualizando métricas…") {
+  const element = $("#metrics-loading");
+  element.hidden = !loading;
+  $("#metrics-loading-label").textContent = label;
+  $(".impact-summary").setAttribute("aria-busy", String(loading));
+}
+
+function setEvaluationState(stage) {
+  const status = $("#evaluation-status");
+  const button = $("#run-button");
+  const states = {
+    starting: ["Preparando evaluación…", "Validando la versión y el dataset."],
+    running: ["Ejecutando evaluación…", "Vertex AI está procesando los usuarios."],
+    results: ["Cargando resultados…", "Actualizando métricas y recorridos."],
+    success: ["Evaluación lista", "Las métricas corresponden a esta corrida."],
+    error: ["No se pudo completar", "Revisá el mensaje de error e intentá nuevamente."],
+  };
+  if (!stage) {
+    status.hidden = true;
+    status.removeAttribute("data-stage");
+    button.disabled = false;
+    button.innerHTML = '<svg viewBox="0 0 24 24"><path d="m9 7 8 5-8 5z"></path></svg> Iniciar evaluación';
+    return;
+  }
+  const [title, detail] = states[stage];
+  status.hidden = false;
+  status.dataset.stage = stage;
+  $("#evaluation-status-title").textContent = title;
+  $("#evaluation-status-detail").textContent = detail;
+  const busy = ["starting", "running", "results"].includes(stage);
+  button.disabled = busy;
+  button.innerHTML = busy
+    ? `<span class="spinner button-spinner" aria-hidden="true"></span>${title.replace("…", "")}`
+    : '<svg viewBox="0 0 24 24"><path d="m9 7 8 5-8 5z"></path></svg> Iniciar evaluación';
+}
+
 async function refreshDashboard(runId = null, policyVersion = state.policy?.metadata.version) {
+  const requestId = ++state.dashboardRequest;
   const query = new URLSearchParams();
   if (runId) query.set("run_id", runId);
   else if (policyVersion) query.set("policy_version", policyVersion);
-  state.dashboard = await api(`/api/dashboard?${query.toString()}`);
-  updateMetrics(state.dashboard);
-  renderTree();
+  setMetricsLoading(true);
+  try {
+    const dashboard = await api(`/api/dashboard?${query.toString()}`);
+    if (requestId !== state.dashboardRequest) return;
+    state.dashboard = dashboard;
+    updateMetrics(state.dashboard);
+    renderTree();
+  } finally {
+    if (requestId === state.dashboardRequest) setMetricsLoading(false);
+  }
 }
 
 function syncVersionUi() {
@@ -511,20 +556,27 @@ $("#publish-form").addEventListener("submit", async (event) => {
 });
 
 async function executeEvaluation() {
-  const button = $("#run-button"); button.disabled = true; button.textContent = "Ejecutando…";
+  setEvaluationState("starting");
+  await new Promise((resolve) => window.requestAnimationFrame(resolve));
   try {
+    if (state.mode !== "impact") await setMode("impact");
+    setEvaluationState("running");
     const result = await api("/api/runs", { method: "POST", body: JSON.stringify({ instances: [{}], parameters: { limit: Number($("#run-limit").value), policy_version: state.policy.metadata.version } }) });
+    setEvaluationState("results");
     await loadRuns(result.policy_version, result.run_id);
+    setEvaluationState("success");
     toast(`${result.processed_rows} usuarios · versión ${result.policy_version}`);
+    window.setTimeout(() => {
+      if ($("#evaluation-status").dataset.stage === "success") setEvaluationState(null);
+    }, 2800);
   }
-  catch (error) { toast(`Falló la ejecución: ${error.message}`, true); }
-  finally { button.disabled = false; button.innerHTML = '<svg viewBox="0 0 24 24"><path d="m9 7 8 5-8 5z"></path></svg> Iniciar evaluación'; }
+  catch (error) {
+    setEvaluationState("error");
+    toast(`Falló la ejecución: ${error.message}`, true);
+  }
 }
 
-$("#run-button").addEventListener("click", async () => {
-  if (state.mode !== "impact") await setMode("impact");
-  await executeEvaluation();
-});
+$("#run-button").addEventListener("click", executeEvaluation);
 
 async function setMode(mode) {
   if (mode === state.mode) return;
@@ -563,8 +615,10 @@ $$('.nav-item').forEach((button) => button.addEventListener("click", async () =>
 }));
 
 $("#version-select").addEventListener("change", async (event) => {
+  setMetricsLoading(true, "Cargando versión…");
   try { await loadPolicyVersion(event.target.value); }
   catch (error) { toast(`No se pudo cargar la versión: ${error.message}`, true); }
+  finally { setMetricsLoading(false); }
 });
 
 $("#editor-version-select").addEventListener("change", async (event) => {
@@ -574,6 +628,7 @@ $("#editor-version-select").addEventListener("change", async (event) => {
 
 $("#run-select").addEventListener("change", async (event) => {
   const version = $("#version-select").value;
+  setMetricsLoading(true, "Cargando corrida…");
   try {
     if (!event.target.value) {
       await loadPolicyVersion(version, null, false);
@@ -588,6 +643,7 @@ $("#run-select").addEventListener("change", async (event) => {
     syncVersionUi();
   }
   catch (error) { toast(`No se pudo cargar la corrida: ${error.message}`, true); }
+  finally { setMetricsLoading(false); }
 });
 
 function openPromotion(version) {
