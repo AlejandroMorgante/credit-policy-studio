@@ -49,8 +49,29 @@ adapters are constructed when not running locally.
 
 ## 2. Policy storage: GCS to S3
 
-The GCS repository relies on object generations for optimistic concurrency. S3 provides the same
-guarantees with bucket versioning plus conditional writes:
+Both clouds offer the same two primitives — create-only and replace-if-unchanged writes over
+versioned objects — so the repository logic is not duplicated per cloud. `ObjectPolicyRepository`
+holds all of it and talks to an `ObjectStore`:
+
+```python
+class ObjectStore(Protocol):
+    def read(self, key, version=None) -> str: ...  # a pinned version, or the latest
+    def create(self, key, payload) -> str: ...  # create-only; FileExistsError on conflict
+    def replace(self, key, payload) -> str: ...  # replace-if-unchanged
+    def put(self, key, payload) -> str: ...  # unconditional, for the active pointer
+    def version_of(self, key) -> str: ...
+    def list_direct(self, prefix) -> list[str]: ...  # direct keys plus child prefixes
+```
+
+`GcsObjectStore` and `S3ObjectStore` are the only cloud-specific code — about 70 lines each against
+165 shared. `tests/test_policy_repository.py` runs the contract against an in-memory store, so the
+shared behaviour is covered once instead of once per cloud.
+
+This is not cosmetic. While the two repositories were duplicated, the fix for publishing the first
+version before any active pointer exists landed only on the S3 copy; Cloud Storage still resolved
+the policy id through `get_active()` and could not bootstrap. Unifying fixed both.
+
+The mapping each store implements:
 
 | GCS behaviour | S3 equivalent |
 | --- | --- |
@@ -60,19 +81,16 @@ guarantees with bucket versioning plus conditional writes:
 | `upload_from_string(..., if_generation_match=g)` (unchanged only) | `PutObject(..., IfMatch=etag)` |
 | `list_blobs(prefix=...)` | `list_objects_v2(Prefix=..., Delimiter="/")` |
 
-`S3PolicyRepository` also resolves the policy id from the active pointer, falling back to the only
-published prefix under `policies/` so that publishing the very first version works before any
-pointer exists.
-
-The active pointer object keeps the same shape, with `generation` replaced by `version_id`:
+The active pointer object keeps the same shape, with `generation` replaced by `version_id`. Legacy
+pointers written by `scripts/publish_policy.sh` still carry `generation` and are read unchanged:
 
 ```json
 {"policy_id": "...", "version": "...", "object": "policies/.../v2.json", "version_id": "..."}
 ```
 
-`S3PolicyRepository` therefore mirrors `GcsPolicyRepository` method for method. Failed conditional
-writes raise `PreconditionFailed` / `ConditionalRequestConflict`, which map to the existing
-`FileExistsError` and `PermissionError` the API already translates to HTTP 409.
+Failed conditional writes raise `PreconditionFailed` / `ConditionalRequestConflict`, which the store
+maps to the `FileExistsError` and `FileNotFoundError` the repository already translates to HTTP 409
+and 404.
 
 The bucket is created with versioning enabled, public access blocked, SSE-S3 (or KMS) enabled, and
 a lifecycle rule that expires noncurrent versions after 20 newer versions, matching the current

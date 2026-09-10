@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import json
 import time
-from hashlib import sha256
 from typing import Any
 from uuid import uuid4
 
@@ -16,7 +15,8 @@ import boto3
 from botocore.exceptions import ClientError
 
 from .config import Settings
-from .models import Applicant, CreditPolicy, PredictionParameters, RunSummary, ScoringResult
+from .models import Applicant, PredictionParameters, RunSummary, ScoringResult
+from .repositories import ObjectPolicyRepository
 
 _CREATE_ONLY = "*"
 _MISSING = {"NoSuchKey", "404", "NoSuchVersion"}
@@ -27,28 +27,36 @@ def _code(error: ClientError) -> str:
     return str(error.response.get("Error", {}).get("Code", ""))
 
 
-class S3PolicyRepository:
-    """Immutable policy objects selected by a small mutable active pointer.
+class S3ObjectStore:
+    """S3 object store; version ids are the version tokens.
 
-    Mirrors GcsPolicyRepository. Object generations become S3 version ids, and the
-    generation preconditions become S3 conditional writes (IfNoneMatch / IfMatch).
+    Object generations map to S3 version ids, and generation preconditions map to
+    S3 conditional writes (IfNoneMatch for create-only, IfMatch for replace).
     """
 
     def __init__(
         self,
         bucket_name: str,
-        active_object: str,
         region: str = "us-east-1",
         client: Any | None = None,
     ) -> None:
         self.bucket_name = bucket_name
-        self.active_object = active_object
         self.client = client or boto3.client("s3", region_name=region)
 
-    def _read(self, key: str, version_id: str | None = None) -> str:
-        kwargs = {"Bucket": self.bucket_name, "Key": key}
-        if version_id:
-            kwargs["VersionId"] = version_id
+    def _put(self, key: str, payload: str, **conditions: str) -> str:
+        response = self.client.put_object(
+            Bucket=self.bucket_name,
+            Key=key,
+            Body=payload.encode("utf-8"),
+            ContentType="application/json",
+            **conditions,
+        )
+        return str(response.get("VersionId", ""))
+
+    def read(self, key: str, version: str | int | None = None) -> str:
+        kwargs: dict[str, Any] = {"Bucket": self.bucket_name, "Key": key}
+        if version:
+            kwargs["VersionId"] = str(version)
         try:
             return self.client.get_object(**kwargs)["Body"].read().decode("utf-8")
         except ClientError as error:
@@ -56,178 +64,54 @@ class S3PolicyRepository:
                 raise FileNotFoundError(f"Object {key!r} does not exist") from error
             raise
 
-    def _write(
-        self,
-        key: str,
-        payload: str,
-        *,
-        if_none_match: str | None = None,
-        if_match: str | None = None,
-    ) -> dict[str, Any]:
-        kwargs: dict[str, Any] = {
-            "Bucket": self.bucket_name,
-            "Key": key,
-            "Body": payload.encode("utf-8"),
-            "ContentType": "application/json",
-        }
-        if if_none_match:
-            kwargs["IfNoneMatch"] = if_none_match
-        if if_match:
-            kwargs["IfMatch"] = if_match
-        return self.client.put_object(**kwargs)
-
-    def _object_name(self, policy_id: str, version: str) -> str:
-        return f"policies/{policy_id}/{version}.json"
-
-    @staticmethod
-    def _sha(policy: CreditPolicy) -> str:
-        payload = json.dumps(
-            policy.model_dump(mode="json"), sort_keys=True, separators=(",", ":")
-        ).encode()
-        return sha256(payload).hexdigest()
-
-    def _pointer(self) -> dict[str, Any] | None:
+    def create(self, key: str, payload: str) -> str:
         try:
-            return json.loads(self._read(self.active_object))
-        except FileNotFoundError:
-            return None
-
-    def _policy_id(self) -> str:
-        """Policy id from the active pointer, or from the only published policy prefix.
-
-        Publishing the first version has to work before any pointer exists.
-        """
-        pointer = self._pointer()
-        if pointer and pointer.get("policy_id"):
-            return str(pointer["policy_id"])
-        response = self.client.list_objects_v2(
-            Bucket=self.bucket_name, Prefix="policies/", Delimiter="/"
-        )
-        prefixes = [item["Prefix"] for item in response.get("CommonPrefixes", [])]
-        if len(prefixes) != 1:
-            raise FileNotFoundError(
-                "No policy has been published yet"
-                if not prefixes
-                else "Several policy ids exist; activate one to set the active pointer"
-            )
-        return prefixes[0].removeprefix("policies/").rstrip("/")
-
-    def get_active(self) -> CreditPolicy:
-        pointer = self._pointer()
-        if pointer is None:
-            raise FileNotFoundError("No active policy pointer exists")
-        payload = self._read(pointer["object"], pointer.get("version_id"))
-        policy = CreditPolicy.model_validate_json(payload)
-        if policy.metadata.version != pointer["version"]:
-            raise ValueError("Active pointer version does not match the referenced policy")
-        return policy
-
-    def get_version(self, version: str) -> CreditPolicy:
-        object_name = self._object_name(self._policy_id(), version)
-        policy = CreditPolicy.model_validate_json(self._read(object_name))
-        if policy.metadata.version != version:
-            raise ValueError("Stored policy version does not match its object name")
-        return policy
-
-    def get_revision(self, version: str, policy_sha256: str) -> CreditPolicy:
-        current = self.get_version(version)
-        if self._sha(current) == policy_sha256:
-            return current
-        key = f"policies/{self._policy_id()}/{version}/revisions/{policy_sha256}.json"
-        try:
-            return CreditPolicy.model_validate_json(self._read(key))
-        except FileNotFoundError as error:
-            raise FileNotFoundError(
-                f"Revision {policy_sha256!r} for policy version {version!r} does not exist"
-            ) from error
-
-    def list_versions(self) -> list[dict[str, str | bool]]:
-        pointer = self._pointer()
-        active_version = pointer["version"] if pointer else None
-        prefix = f"policies/{self._policy_id()}/"
-        versions: list[dict[str, str | bool]] = []
-        paginator = self.client.get_paginator("list_objects_v2")
-        # Delimiter keeps revision subprefixes out; only version objects are listed.
-        for page in paginator.paginate(Bucket=self.bucket_name, Prefix=prefix, Delimiter="/"):
-            for item in page.get("Contents", []):
-                if not item["Key"].endswith(".json"):
-                    continue
-                policy = CreditPolicy.model_validate_json(self._read(item["Key"]))
-                versions.append(
-                    {
-                        "version": policy.metadata.version,
-                        "created_at": policy.metadata.created_at.isoformat(),
-                        "created_by": policy.metadata.created_by,
-                        "active": policy.metadata.version == active_version,
-                    }
-                )
-        return sorted(versions, key=lambda item: str(item["created_at"]), reverse=True)
-
-    def _write_snapshot(self, policy: CreditPolicy) -> None:
-        key = (
-            f"policies/{policy.metadata.policy_id}/{policy.metadata.version}/revisions/"
-            f"{self._sha(policy)}.json"
-        )
-        try:
-            self._write(key, policy.model_dump_json(indent=2), if_none_match=_CREATE_ONLY)
-        except ClientError as error:
-            if _code(error) not in _CONFLICT:
-                raise
-
-    def publish(self, policy: CreditPolicy) -> dict[str, str | int]:
-        object_name = self._object_name(policy.metadata.policy_id, policy.metadata.version)
-        try:
-            response = self._write(
-                object_name, policy.model_dump_json(indent=2), if_none_match=_CREATE_ONLY
-            )
+            return self._put(key, payload, IfNoneMatch=_CREATE_ONLY)
         except ClientError as error:
             if _code(error) in _CONFLICT:
-                raise FileExistsError(
-                    f"Policy version {policy.metadata.version!r} already exists"
-                ) from error
+                raise FileExistsError(f"Object {key!r} already exists") from error
             raise
-        self._write_snapshot(policy)
-        return {
-            "policy_id": policy.metadata.policy_id,
-            "version": policy.metadata.version,
-            "object": object_name,
-            "generation": response.get("VersionId", ""),
-        }
 
-    def update(self, policy: CreditPolicy) -> dict[str, str | int]:
-        pointer = self._pointer()
-        if pointer and policy.metadata.version == pointer["version"]:
-            raise PermissionError("The productive version is immutable; create a candidate version")
-        object_name = self._object_name(policy.metadata.policy_id, policy.metadata.version)
+    def replace(self, key: str, payload: str) -> str:
         try:
-            head = self.client.head_object(Bucket=self.bucket_name, Key=object_name)
+            head = self.client.head_object(Bucket=self.bucket_name, Key=key)
         except ClientError as error:
             if _code(error) in _MISSING:
-                raise FileNotFoundError(
-                    f"Policy version {policy.metadata.version!r} does not exist"
-                ) from error
+                raise FileNotFoundError(f"Object {key!r} does not exist") from error
             raise
-        response = self._write(object_name, policy.model_dump_json(indent=2), if_match=head["ETag"])
-        self._write_snapshot(policy)
-        return {
-            "policy_id": policy.metadata.policy_id,
-            "version": policy.metadata.version,
-            "object": object_name,
-            "generation": response.get("VersionId", ""),
-        }
+        return self._put(key, payload, IfMatch=head["ETag"])
 
-    def activate(self, version: str) -> dict[str, str | int]:
-        policy = self.get_version(version)
-        object_name = self._object_name(policy.metadata.policy_id, version)
-        head = self.client.head_object(Bucket=self.bucket_name, Key=object_name)
-        pointer = {
-            "policy_id": policy.metadata.policy_id,
-            "version": version,
-            "object": object_name,
-            "version_id": head.get("VersionId", ""),
-        }
-        self._write(self.active_object, json.dumps(pointer, separators=(",", ":")))
-        return pointer
+    def put(self, key: str, payload: str) -> str:
+        return self._put(key, payload)
+
+    def version_of(self, key: str) -> str:
+        try:
+            head = self.client.head_object(Bucket=self.bucket_name, Key=key)
+        except ClientError as error:
+            if _code(error) in _MISSING:
+                raise FileNotFoundError(f"Object {key!r} does not exist") from error
+            raise
+        return str(head.get("VersionId", ""))
+
+    def list_direct(self, prefix: str) -> list[str]:
+        keys: list[str] = []
+        prefixes: list[str] = []
+        paginator = self.client.get_paginator("list_objects_v2")
+        for page in paginator.paginate(Bucket=self.bucket_name, Prefix=prefix, Delimiter="/"):
+            keys.extend(item["Key"] for item in page.get("Contents", []))
+            prefixes.extend(item["Prefix"] for item in page.get("CommonPrefixes", []))
+        return keys + prefixes
+
+
+class S3PolicyRepository(ObjectPolicyRepository):
+    def __init__(
+        self,
+        bucket_name: str,
+        active_object: str,
+        region: str = "us-east-1",
+        client: Any | None = None,
+    ) -> None:
+        super().__init__(S3ObjectStore(bucket_name, region, client), active_object)
 
 
 _TERMINAL = {"SUCCEEDED", "FAILED", "CANCELLED"}
