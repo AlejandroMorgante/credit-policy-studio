@@ -55,10 +55,12 @@ jobs:
           terraform -chdir=infra fmt -check -recursive
           terraform -chdir=infra/aws fmt -check -recursive
 
+      # -lockfile=readonly makes CI fail if a lock file is missing or stale
+      # rather than silently selecting a different provider release.
       - name: Initialize Terraform
         run: |
-          terraform -chdir=infra init -backend=false
-          terraform -chdir=infra/aws init -backend=false
+          terraform -chdir=infra init -backend=false -lockfile=readonly
+          terraform -chdir=infra/aws init -backend=false -lockfile=readonly
 
       - name: Validate Terraform
         run: |

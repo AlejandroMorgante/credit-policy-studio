@@ -25,6 +25,3 @@ terraform.tfvars
 
 # Local application data
 .local/
-
-# Terraform provider lock files
-.terraform.lock.hcl
