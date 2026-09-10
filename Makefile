@@ -134,10 +134,17 @@ destroy-gcp:
 
 # --- AWS recipes --------------------------------------------------------------
 
-AWS_ECR_REPO := credit-policy-studio
-ECR = $(shell terraform -chdir=$(TF_DIR_aws) output -raw ecr_repository_url)
+# The repository URL from Terraform is the single source of truth; the repository
+# name is whatever follows the registry host, so a custom name_prefix stays
+# consistent between publishing and deploying.
+# With no state, `terraform output` prints a "No outputs found" warning on
+# stdout and still exits 0, so the value is filtered by shape rather than by
+# redirecting stderr. Anything that is not a registry URL becomes empty.
+ECR = $(shell terraform -chdir=$(TF_DIR_aws) output -raw ecr_repository_url 2>/dev/null | grep -E '^[0-9]+\.dkr\.ecr\.[a-z0-9-]+\.amazonaws\.com/' || true)
+require_ecr = test -n "$(ECR)" || { echo "No ECR repository found; run 'make infra CLOUD=aws' first"; exit 1; }
 
 image-aws:
+	@$(require_ecr)
 	aws ecr get-login-password --region $(AWS_REGION) | docker login --username AWS --password-stdin $(firstword $(subst /, ,$(ECR)))
 	docker build -f $(DOCKERFILE_aws) -t $(ECR):$(AWS_IMAGE_TAG) .
 	docker push $(ECR):$(AWS_IMAGE_TAG)
@@ -155,9 +162,11 @@ upload-policy-aws:
 # deploy time, so re-pushing the same tag leaves the endpoint on the old image
 # and leaves Terraform with no argument change to act on.
 deploy-aws:
-	digest=$$(aws ecr describe-images --region $(AWS_REGION) --repository-name $(AWS_ECR_REPO) \
+	@$(require_ecr)
+	ecr="$(ECR)"; repo="$${ecr#*/}"; \
+	digest=$$(aws ecr describe-images --region $(AWS_REGION) --repository-name "$${repo}" \
 		--image-ids imageTag=$(AWS_IMAGE_TAG) --query 'imageDetails[0].imageDigest' --output text); \
-	test -n "$${digest}" -a "$${digest}" != "None" || { echo "No image found for tag $(AWS_IMAGE_TAG); run 'make image CLOUD=aws' first"; exit 1; }; \
+	test -n "$${digest}" -a "$${digest}" != "None" || { echo "No image found for $${repo}:$(AWS_IMAGE_TAG); run 'make image CLOUD=aws' first"; exit 1; }; \
 	echo "Deploying $(ECR)@$${digest}"; \
 	terraform -chdir=$(TF_DIR_aws) apply $(TF_VARS_aws) -var="deploy_endpoint=true" -var="container_image=$(ECR)@$${digest}"
 
