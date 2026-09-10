@@ -8,7 +8,12 @@ import boto3
 import pytest
 from moto import mock_aws
 
-from credit_policy_studio.aws import AthenaWarehouse, S3PolicyRepository, SageMakerInvoker
+from credit_policy_studio.aws import (
+    AthenaWarehouse,
+    S3PolicyRepository,
+    SageMakerInvoker,
+    _literal,
+)
 from credit_policy_studio.config import Settings
 from credit_policy_studio.engine import DecisionEngine
 from credit_policy_studio.models import CreditPolicy, PredictionParameters
@@ -184,7 +189,9 @@ def test_list_runs_is_parameterized_and_restores_decisions() -> None:
     assert runs[0]["decisions"] == {"APPROVED": 2}
     assert "decisions_json" not in runs[0]
     call = store.athena.calls[0]
-    assert call["ExecutionParameters"] == ["2026-09-09.1"]
+    # Athena substitutes parameters as SQL text: an unquoted 2026-09-09.1 parses
+    # as a number and the query fails with TYPE_MISMATCH.
+    assert call["ExecutionParameters"] == ["'2026-09-09.1'"]
     assert "policy_version = ?" in call["QueryString"]
     assert "2026-09-09.1" not in call["QueryString"]
 
@@ -202,8 +209,25 @@ def test_dashboard_filters_every_query_by_the_selected_run() -> None:
     assert dashboard["latest_run"]["run_id"] == "run-1"
     assert dashboard["nodes"] == nodes
     for call in store.athena.calls[1:]:
-        assert call["ExecutionParameters"] == ["run-1"]
+        assert call["ExecutionParameters"] == ["'run-1'"]
         assert "json_extract_scalar" in call["QueryString"] or "decision" in call["QueryString"]
+
+
+def test_string_parameters_are_sent_as_quoted_sql_literals() -> None:
+    assert _literal("2026-09-09.1") == "'2026-09-09.1'"
+    assert _literal("40d2d84e-a9c8-4e62-b925-bb9589e5d534") == (
+        "'40d2d84e-a9c8-4e62-b925-bb9589e5d534'"
+    )
+    # A quote inside the value must be doubled, not left to break the literal.
+    assert _literal("o'brien") == "'o''brien'"
+
+
+def test_dashboard_filters_are_quoted_for_every_parameter() -> None:
+    latest = [{"run_id": "run-1", "decisions_json": "{}", "completed_at": "2026-09-09T00:00:00Z"}]
+    store = warehouse([latest, [], [], []])
+    store.dashboard(policy_version="2026-09-09.1", run_id="run-1")
+
+    assert store.athena.calls[0]["ExecutionParameters"] == ["'2026-09-09.1'", "'run-1'"]
 
 
 def test_dashboard_without_runs_returns_the_empty_shape() -> None:

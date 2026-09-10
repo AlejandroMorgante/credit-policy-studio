@@ -114,6 +114,18 @@ class S3PolicyRepository(ObjectPolicyRepository):
         super().__init__(S3ObjectStore(bucket_name, region, client), active_object)
 
 
+def _literal(value: str) -> str:
+    """Quote and escape a string for Athena's ExecutionParameters.
+
+    Athena substitutes execution parameters as SQL literal text rather than
+    binding them as typed values, so an unquoted string is parsed as SQL. A
+    policy version like 2026-09-09.1 reads as a number and the query fails with
+    "TYPE_MISMATCH: Cannot apply operator: varchar = double". Doubling any
+    embedded quote keeps the literal well formed.
+    """
+    return "'" + value.replace("'", "''") + "'"
+
+
 _TERMINAL = {"SUCCEEDED", "FAILED", "CANCELLED"}
 _INT_TYPES = {"bigint", "integer", "smallint", "tinyint"}
 _FLOAT_TYPES = {"double", "float", "real", "decimal"}
@@ -260,7 +272,7 @@ class AthenaWarehouse:
         return run
 
     def list_runs(self, policy_version: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
-        parameters = [policy_version] if policy_version else []
+        parameters = [_literal(policy_version)] if policy_version else []
         where = "WHERE policy_version = ?" if policy_version else ""
         query = f"""
             SELECT run_id, policy_id, policy_version, policy_sha256, processed_rows,
@@ -279,10 +291,10 @@ class AthenaWarehouse:
         parameters = []
         if policy_version:
             filters.append("policy_version = ?")
-            parameters.append(policy_version)
+            parameters.append(_literal(policy_version))
         if run_id:
             filters.append("run_id = ?")
-            parameters.append(run_id)
+            parameters.append(_literal(run_id))
         where = f"WHERE {' AND '.join(filters)}" if filters else ""
         latest_query = f"""
             SELECT run_id, policy_id, policy_version, policy_sha256, processed_rows,
@@ -296,7 +308,7 @@ class AthenaWarehouse:
         if not latest_rows:
             return {"total": 0, "decisions": [], "nodes": [], "paths": [], "latest_run": None}
         latest_run = self._run_row(latest_rows[0])
-        selected = [str(latest_run["run_id"])]
+        selected = [_literal(str(latest_run["run_id"]))]
         results = self._table(self.output_table)
         decision_query = f"""
             SELECT decision, COUNT(*) AS count

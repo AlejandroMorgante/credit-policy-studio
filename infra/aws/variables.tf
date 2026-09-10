@@ -29,6 +29,8 @@ variable "glue_database" {
 }
 
 variable "container_image" {
+  # Pass a digest (repo@sha256:...), not a tag: a mutable tag leaves Terraform
+  # with no change to detect when a new image is pushed under the same name.
   description = "Published image URI. Empty creates only the core infrastructure."
   type        = string
   default     = ""

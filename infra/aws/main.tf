@@ -408,6 +408,11 @@ locals {
   create_endpoint = var.deploy_endpoint && var.container_image != "" ? 1 : 0
 }
 
+# The model and endpoint configuration are named after the image reference, so a
+# new release must change that reference. `make deploy CLOUD=aws` passes an
+# immutable digest (repo@sha256:...) rather than a tag: SageMaker resolves a tag
+# to a digest once, at deploy time, so re-pushing the same tag would leave both
+# Terraform and the endpoint unaware that anything changed.
 resource "aws_sagemaker_model" "scoring" {
   count              = local.create_endpoint
   name               = "${var.name_prefix}-${substr(sha256(var.container_image), 0, 8)}"

@@ -28,7 +28,8 @@ TF_VARS_gcp += -var="deletion_protection=false" -var="force_destroy_data=true"
 endif
 
 AWS_REGION ?= us-east-1
-AWS_IMAGE_TAG ?= dev
+# Tagging by commit keeps releases traceable; deploy resolves the digest anyway.
+AWS_IMAGE_TAG ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo dev)
 
 TF_DIR_aws := infra/aws
 DOCKERFILE_aws := Dockerfile.aws
@@ -133,6 +134,7 @@ destroy-gcp:
 
 # --- AWS recipes --------------------------------------------------------------
 
+AWS_ECR_REPO := credit-policy-studio
 ECR = $(shell terraform -chdir=$(TF_DIR_aws) output -raw ecr_repository_url)
 
 image-aws:
@@ -149,8 +151,15 @@ upload-policy-aws:
 	AWS_REGION=$(AWS_REGION) POLICY_BUCKET=$$(terraform -chdir=$(TF_DIR_aws) output -raw policy_bucket) \
 		$(PYTHON) scripts/aws_setup.py publish policies/credit_policy_v1.json
 
+# Deploy by digest, never by tag. SageMaker resolves a tag to a digest once, at
+# deploy time, so re-pushing the same tag leaves the endpoint on the old image
+# and leaves Terraform with no argument change to act on.
 deploy-aws:
-	terraform -chdir=$(TF_DIR_aws) apply $(TF_VARS_aws) -var="deploy_endpoint=true" -var="container_image=$(ECR):$(AWS_IMAGE_TAG)"
+	digest=$$(aws ecr describe-images --region $(AWS_REGION) --repository-name $(AWS_ECR_REPO) \
+		--image-ids imageTag=$(AWS_IMAGE_TAG) --query 'imageDetails[0].imageDigest' --output text); \
+	test -n "$${digest}" -a "$${digest}" != "None" || { echo "No image found for tag $(AWS_IMAGE_TAG); run 'make image CLOUD=aws' first"; exit 1; }; \
+	echo "Deploying $(ECR)@$${digest}"; \
+	terraform -chdir=$(TF_DIR_aws) apply $(TF_VARS_aws) -var="deploy_endpoint=true" -var="container_image=$(ECR)@$${digest}"
 
 undeploy-aws:
 	terraform -chdir=$(TF_DIR_aws) apply $(TF_VARS_aws) -var="deploy_endpoint=false"
