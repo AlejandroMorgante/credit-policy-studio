@@ -63,7 +63,7 @@ variable "endpoint_serverless_max_concurrency" {
 }
 
 variable "force_destroy" {
-  description = "Allow Terraform to delete non-empty buckets and the Athena workgroup's query history. Unsafe outside a throwaway POC."
+  description = "Allow Terraform to delete non-empty buckets, the Athena workgroup's query history, and an ECR repository that still holds images. Unsafe outside a throwaway POC."
   type        = bool
   default     = false
 }

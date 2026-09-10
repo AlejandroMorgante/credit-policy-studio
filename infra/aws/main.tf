@@ -290,7 +290,10 @@ resource "aws_athena_workgroup" "studio" {
 resource "aws_ecr_repository" "containers" {
   name                 = var.name_prefix
   image_tag_mutability = "MUTABLE"
-  tags                 = local.tags
+  # Like the buckets and the Athena workgroup: without this, a repository that
+  # holds any image refuses to be destroyed.
+  force_delete = var.force_destroy
+  tags         = local.tags
 
   image_scanning_configuration {
     scan_on_push = true
