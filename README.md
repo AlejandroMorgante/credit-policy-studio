@@ -51,7 +51,8 @@ API key, service-account key, or public web endpoint is created for the current 
 
 ## What is included
 
-- A typed Python decision engine with graph, reference, and cycle validation.
+- A typed Python decision engine with graph, reference, cycle, safe-expression, and derived-node
+  evaluation.
 - Vertex-compatible `/health` and `/predict` routes (`instances` in, `predictions` out).
 - Mutable candidate workspaces with immutable SHA-addressed revisions and an exact productive pointer.
 - BigQuery input, per-user results, execution metadata, policy hash, and ordered decision traces.
@@ -98,8 +99,10 @@ make run
 ```
 
 Open <http://localhost:8080>. Without `VERTEX_ENDPOINT_ID`, local mode uses eight in-memory fictional
-applicants. Edit a threshold, create a candidate version, open **Evaluación**, select it, run the
-dataset, and promote it only if the result is acceptable.
+applicants and the executable cascade in `policies/credit_policy_cascade.json`. Calculation nodes
+derive the selected score, population, risk band, cluster, payment capacity and offer. Create a
+candidate version, open **Evaluación**, select it, run the dataset, and promote it only if the result
+is acceptable.
 
 ## Disposable POC lifecycle
 

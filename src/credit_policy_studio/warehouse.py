@@ -24,79 +24,34 @@ class Warehouse(Protocol):
     ) -> dict[str, Any]: ...
 
 
+def _demo_applicant(user_id: str, **values: Any) -> Applicant:
+    defaults = {
+        "account_id": f"ACC-{user_id.removeprefix('USR-')}",
+        "age": 35,
+        "account_tenure_months": 12,
+        "declared_income": 5000,
+        "estimated_monthly_debt": 500,
+        "maximum_days_past_due_12m": 0,
+        "completed_loans": 1,
+        "is_restricted": False,
+        "has_recent_default": False,
+        "behavior_score": 0.15,
+        "behavior_score_version": "demo_behavior_v1",
+        "application_score": None,
+        "application_score_version": None,
+    }
+    return Applicant(user_id=user_id, **(defaults | values))
+
+
 DEMO_APPLICANTS = [
-    Applicant(
-        user_id="USR-1001",
-        score_1=742,
-        score_2=84,
-        score_3=91,
-        variable_1=5200,
-        variable_2=900,
-        variable_3=46,
-    ),
-    Applicant(
-        user_id="USR-1002",
-        score_1=618,
-        score_2=58,
-        score_3=64,
-        variable_1=3100,
-        variable_2=1250,
-        variable_3=18,
-    ),
-    Applicant(
-        user_id="USR-1003",
-        score_1=544,
-        score_2=72,
-        score_3=70,
-        variable_1=2800,
-        variable_2=600,
-        variable_3=26,
-    ),
-    Applicant(
-        user_id="USR-1004",
-        score_1=691,
-        score_2=43,
-        score_3=59,
-        variable_1=4400,
-        variable_2=2100,
-        variable_3=8,
-    ),
-    Applicant(
-        user_id="USR-1005",
-        score_1=775,
-        score_2=91,
-        score_3=87,
-        variable_1=6800,
-        variable_2=1100,
-        variable_3=62,
-    ),
-    Applicant(
-        user_id="USR-1006",
-        score_1=582,
-        score_2=66,
-        score_3=52,
-        variable_1=2500,
-        variable_2=950,
-        variable_3=14,
-    ),
-    Applicant(
-        user_id="USR-1007",
-        score_1=655,
-        score_2=77,
-        score_3=78,
-        variable_1=3900,
-        variable_2=850,
-        variable_3=31,
-    ),
-    Applicant(
-        user_id="USR-1008",
-        score_1=509,
-        score_2=39,
-        score_3=45,
-        variable_1=1900,
-        variable_2=1200,
-        variable_3=5,
-    ),
+    _demo_applicant("USR-1001", completed_loans=3, declared_income=7000),
+    _demo_applicant("USR-1002", is_restricted=True),
+    _demo_applicant("USR-1003", has_recent_default=True),
+    _demo_applicant("USR-1004", age=19),
+    _demo_applicant("USR-1005", maximum_days_past_due_12m=40),
+    _demo_applicant("USR-1006", declared_income=800),
+    _demo_applicant("USR-1007", behavior_score=0.52, declared_income=6000),
+    _demo_applicant("USR-1008", behavior_score=0.8),
 ]
 
 
@@ -186,7 +141,7 @@ class BigQueryWarehouse:
 
     def read_applicants(self, limit: int) -> list[Applicant]:
         query = f"""
-            SELECT user_id, score_1, score_2, score_3, variable_1, variable_2, variable_3
+            SELECT *
             FROM `{self.input_table}`
             ORDER BY user_id
             LIMIT @limit

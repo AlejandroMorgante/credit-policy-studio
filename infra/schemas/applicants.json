@@ -1,9 +1,22 @@
 [
   {"name":"user_id","type":"STRING","mode":"REQUIRED","description":"Synthetic user identifier."},
-  {"name":"score_1","type":"FLOAT","mode":"REQUIRED","description":"Fictitious bureau score (300-850)."},
-  {"name":"score_2","type":"FLOAT","mode":"REQUIRED","description":"Fictitious affordability score (0-100)."},
-  {"name":"score_3","type":"FLOAT","mode":"REQUIRED","description":"Fictitious behavioral score (0-100)."},
-  {"name":"variable_1","type":"FLOAT","mode":"REQUIRED","description":"Fictitious monthly income."},
-  {"name":"variable_2","type":"FLOAT","mode":"REQUIRED","description":"Fictitious monthly debt."},
-  {"name":"variable_3","type":"FLOAT","mode":"REQUIRED","description":"Fictitious employment tenure in months."}
+  {"name":"score_1","type":"FLOAT","mode":"NULLABLE","description":"Legacy fictitious bureau score."},
+  {"name":"score_2","type":"FLOAT","mode":"NULLABLE","description":"Legacy fictitious affordability score."},
+  {"name":"score_3","type":"FLOAT","mode":"NULLABLE","description":"Legacy fictitious behavioral score."},
+  {"name":"variable_1","type":"FLOAT","mode":"NULLABLE","description":"Legacy fictitious monthly income."},
+  {"name":"variable_2","type":"FLOAT","mode":"NULLABLE","description":"Legacy fictitious monthly debt."},
+  {"name":"variable_3","type":"FLOAT","mode":"NULLABLE","description":"Legacy fictitious employment tenure."},
+  {"name":"account_id","type":"STRING","mode":"NULLABLE"},
+  {"name":"age","type":"INTEGER","mode":"NULLABLE"},
+  {"name":"account_tenure_months","type":"INTEGER","mode":"NULLABLE"},
+  {"name":"declared_income","type":"NUMERIC","mode":"NULLABLE"},
+  {"name":"estimated_monthly_debt","type":"NUMERIC","mode":"NULLABLE"},
+  {"name":"maximum_days_past_due_12m","type":"INTEGER","mode":"NULLABLE"},
+  {"name":"completed_loans","type":"INTEGER","mode":"NULLABLE"},
+  {"name":"is_restricted","type":"BOOLEAN","mode":"NULLABLE"},
+  {"name":"has_recent_default","type":"BOOLEAN","mode":"NULLABLE"},
+  {"name":"behavior_score","type":"FLOAT","mode":"NULLABLE"},
+  {"name":"behavior_score_version","type":"STRING","mode":"NULLABLE"},
+  {"name":"application_score","type":"FLOAT","mode":"NULLABLE"},
+  {"name":"application_score_version","type":"STRING","mode":"NULLABLE"}
 ]

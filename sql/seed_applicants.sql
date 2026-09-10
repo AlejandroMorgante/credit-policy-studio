@@ -1,14 +1,15 @@
--- Portable demo dataset. Terraform creates the destination table first.
+-- Portable cascade demo dataset. Terraform creates the destination table first.
 INSERT INTO `${PROJECT_ID}.credit_policy.applicants`
-  (user_id, score_1, score_2, score_3, variable_1, variable_2, variable_3)
+  (user_id, account_id, age, account_tenure_months, declared_income,
+   estimated_monthly_debt, maximum_days_past_due_12m, completed_loans,
+   is_restricted, has_recent_default, behavior_score, behavior_score_version,
+   application_score, application_score_version)
 VALUES
-  ('USR-1001', 742, 84, 91, 5200,  900, 46),
-  ('USR-1002', 618, 58, 64, 3100, 1250, 18),
-  ('USR-1003', 544, 72, 70, 2800,  600, 26),
-  ('USR-1004', 691, 43, 59, 4400, 2100,  8),
-  ('USR-1005', 775, 91, 87, 6800, 1100, 62),
-  ('USR-1006', 582, 66, 52, 2500,  950, 14),
-  ('USR-1007', 655, 77, 78, 3900,  850, 31),
-  ('USR-1008', 509, 39, 45, 1900, 1200,  5),
-  ('USR-1009', 707, 81, 76, 4700, 1350, 29),
-  ('USR-1010', 569, 54, 68, 2300, 1000, 11);
+  ('USR-1001','ACC-1001',35,12,7000,500,0,3,FALSE,FALSE,0.15,'demo_behavior_v1',NULL,NULL),
+  ('USR-1002','ACC-1002',35,12,5000,500,0,1,TRUE,FALSE,0.15,'demo_behavior_v1',NULL,NULL),
+  ('USR-1003','ACC-1003',35,12,5000,500,0,1,FALSE,TRUE,0.15,'demo_behavior_v1',NULL,NULL),
+  ('USR-1004','ACC-1004',19,12,5000,500,0,1,FALSE,FALSE,0.15,'demo_behavior_v1',NULL,NULL),
+  ('USR-1005','ACC-1005',35,12,5000,500,40,1,FALSE,FALSE,0.15,'demo_behavior_v1',NULL,NULL),
+  ('USR-1006','ACC-1006',35,12,800,500,0,1,FALSE,FALSE,0.15,'demo_behavior_v1',NULL,NULL),
+  ('USR-1007','ACC-1007',35,12,6000,500,0,1,FALSE,FALSE,0.52,'demo_behavior_v1',NULL,NULL),
+  ('USR-1008','ACC-1008',35,12,5000,500,0,1,FALSE,FALSE,0.80,'demo_behavior_v1',NULL,NULL);

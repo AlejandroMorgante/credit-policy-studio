@@ -39,7 +39,7 @@ test: ## Run unit and API tests.
 	$(VENV)/bin/pytest --cov=credit_policy_studio --cov-report=term-missing
 
 run: ## Run the complete local demo at http://localhost:8080.
-	LOCAL_POLICY_PATH=policies/credit_policy_v1.json $(VENV)/bin/uvicorn credit_policy_studio.api:app --reload --port 8080
+	LOCAL_POLICY_PATH=policies/credit_policy_cascade.json $(VENV)/bin/uvicorn credit_policy_studio.api:app --reload --port 8080
 
 docker-build: ## Build the runtime container locally.
 	docker build -t credit-policy-studio:local .
@@ -69,7 +69,7 @@ seed: ## Populate the sample applicants table.
 	sed 's/$${PROJECT_ID}/$(PROJECT_ID)/g' sql/seed_applicants.sql | bq query --project_id=$(PROJECT_ID) --location=$(BQ_LOCATION) --use_legacy_sql=false
 
 upload-policy: ## Upload the sample policy and activate it atomically.
-	PROJECT_ID=$(PROJECT_ID) ./scripts/publish_policy.sh policies/credit_policy_v1.json
+	PROJECT_ID=$(PROJECT_ID) ./scripts/publish_policy.sh policies/credit_policy_cascade.json
 
 destroy: ## Remove all billable resources created by this POC. Requires exact project confirmation.
 	PROJECT_ID=$(PROJECT_ID) REGION=$(REGION) BQ_LOCATION=$(BQ_LOCATION) CONFIRM_DESTROY=$(CONFIRM_DESTROY) ./scripts/destroy_poc.sh

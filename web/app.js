@@ -57,7 +57,9 @@ async function api(path, options = {}) {
 function hierarchy(policy) {
   const children = (id) => {
     const node = policy.nodes[id];
-    return node.type === "condition" ? [node.true_node, node.false_node] : [];
+    if (node.type === "condition") return [node.true_node, node.false_node];
+    if (node.type === "derive") return [node.next_node];
+    return [];
   };
   const depth = {};
   const visitDepth = (id, level) => {
@@ -154,7 +156,8 @@ function renderTree() {
     button.className = `tree-node${decisionClass}${state.selected === node.id ? " selected" : ""}`;
     button.style.left = `${x[node.id]}px`; button.style.top = `${24 + depth[node.id] * LEVEL_GAP}px`;
     const count = state.mode === "impact" ? `<span class="impact-badge">${nodeCounts[node.id] || 0}</span>` : "";
-    button.innerHTML = `<span class="type"><span>${node.type === "condition" ? "Condición" : node.decision}</span>${count}</span><strong>${node.label}</strong>`;
+    const typeLabel = node.type === "condition" ? "Condición" : (node.type === "derive" ? "Cálculo" : node.decision);
+    button.innerHTML = `<span class="type"><span>${typeLabel}</span>${count}</span><strong>${node.label}</strong>`;
     button.addEventListener("click", () => {
       if (viewportState.dragged) return;
       selectNode(node.id);
@@ -178,7 +181,7 @@ function renderTree() {
       labelGroup.setAttribute("class", `link-label-group ${state.mode}`);
       labelGroup.dataset.anchorX = `${labelX}`;
       labelGroup.dataset.anchorY = `${labelY}`;
-      const branchLabel = index === 0 ? "Sí" : "No";
+      const branchLabel = node.type === "derive" ? "Sigue" : (index === 0 ? "Sí" : "No");
       if (state.mode === "impact") {
         const countLabel = document.createElementNS(ns, "text");
         countLabel.setAttribute("x", `${labelX + 3}`);
@@ -275,15 +278,16 @@ function selectNode(id) {
   state.selected = id;
   const node = state.policy.nodes[id];
   $("#inspector-title").textContent = node.label;
-  $("#node-tag").textContent = node.type === "condition" ? "CONDICIÓN" : "RESULTADO";
+  $("#node-tag").textContent = node.type === "condition" ? "CONDICIÓN" : (node.type === "derive" ? "CÁLCULO" : "RESULTADO");
   $("#node-label").value = node.label;
   const condition = node.type === "condition";
   $("#condition-fields").hidden = !condition; $("#decision-fields").hidden = condition;
   if (condition) {
-    $("#node-field").value = node.field; $("#node-operator").value = node.operator; $("#node-value").value = node.value;
-  } else {
+    $("#node-field").value = node.field || ""; $("#node-operator").value = node.operator || "eq"; $("#node-value").value = node.expression ? "" : node.value;
+  } else if (node.type === "decision") {
     $("#node-decision").value = node.decision; $("#node-band").value = node.risk_band; $("#node-limit").value = node.credit_limit;
   }
+  $$("#node-form input, #node-form select, #node-form button").forEach((control) => { control.disabled = node.type === "derive" || Boolean(node.expression); });
   renderTree();
 }
 
@@ -334,7 +338,8 @@ function syncVersionUi() {
 
 function syncEditorLock() {
   const isProductive = state.editingVersion === state.activeVersion;
-  const locked = state.mode === "impact" || isProductive;
+  const selectedNode = state.policy?.nodes[state.selected];
+  const locked = state.mode === "impact" || isProductive || selectedNode?.type === "derive" || Boolean(selectedNode?.expression);
   $$("#node-form input, #node-form select, #node-form button").forEach((control) => {
     control.disabled = locked;
   });
