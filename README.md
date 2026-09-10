@@ -30,8 +30,6 @@ volumes visible in one workspace. The example below uses only fictional in-memor
 
 ![Animated walkthrough of policy editing and evaluation](docs/assets/credit-policy-studio-demo.gif)
 
-[View the static evaluation screenshot](docs/assets/credit-policy-studio-evaluation.png).
-
 ## How it works
 
 ![Credit Policy Studio architecture](docs/assets/credit-policy-studio-architecture.png)
