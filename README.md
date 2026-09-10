@@ -79,6 +79,11 @@ API key, service-account key, or public web endpoint is created for the current 
 The same application also runs on AWS. `CLOUD_PROVIDER=aws` selects a second set of adapters; the
 decision engine, the API contract, the policy JSON, and the UI are identical on both clouds.
 
+![Credit Policy Studio architecture on AWS](docs/assets/credit-policy-studio-architecture-aws.png)
+
+Compare it with the Google Cloud diagram above: the boxes and arrows are the same, only the managed
+services underneath change.
+
 | Service | AWS responsibility | Replaces | Created now? |
 | --- | --- | --- | --- |
 | S3 (policies) | Immutable SHA-addressed policies and the active pointer, using bucket versioning and conditional writes. | Cloud Storage | Yes |

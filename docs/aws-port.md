@@ -8,6 +8,8 @@ It describes how the current Google Cloud proof of concept is ported to AWS whil
 keeping the existing GCP path working. The application already isolates every cloud dependency
 behind three seams, so the port adds adapters instead of rewriting the domain.
 
+![Credit Policy Studio architecture on AWS](assets/credit-policy-studio-architecture-aws.png)
+
 ## Decisions
 
 | Concern | Google Cloud (today) | AWS (target) |
