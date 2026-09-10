@@ -318,14 +318,31 @@ resource "aws_iam_role" "runtime" {
 
 data "aws_iam_policy_document" "runtime" {
   statement {
-    sid       = "ReadPolicies"
-    actions   = ["s3:GetObject", "s3:GetObjectVersion", "s3:ListBucket", "s3:ListBucketVersions"]
+    sid = "ReadPolicies"
+    actions = [
+      "s3:GetBucketLocation",
+      "s3:GetObject",
+      "s3:GetObjectVersion",
+      "s3:ListBucket",
+      "s3:ListBucketVersions",
+    ]
     resources = [aws_s3_bucket.policies.arn, "${aws_s3_bucket.policies.arn}/*"]
   }
 
+  # Athena needs the full set below, not just read/write: it calls
+  # GetBucketLocation to verify the workgroup's output bucket before running a
+  # query, and stages results as a multipart upload.
   statement {
-    sid       = "ReadWriteData"
-    actions   = ["s3:GetObject", "s3:PutObject", "s3:ListBucket", "s3:AbortMultipartUpload"]
+    sid = "ReadWriteData"
+    actions = [
+      "s3:AbortMultipartUpload",
+      "s3:GetBucketLocation",
+      "s3:GetObject",
+      "s3:ListBucket",
+      "s3:ListBucketMultipartUploads",
+      "s3:ListMultipartUploadParts",
+      "s3:PutObject",
+    ]
     resources = [aws_s3_bucket.data.arn, "${aws_s3_bucket.data.arn}/*"]
   }
 

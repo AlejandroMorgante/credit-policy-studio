@@ -14,15 +14,19 @@ COPY pyproject.toml README.md ./
 COPY src ./src
 COPY policies ./policies
 COPY web ./web
+COPY docker/serve /usr/local/bin/serve
 
 RUN pip install --no-cache-dir ".[aws]"
 
-RUN useradd --create-home --uid 10001 appuser && chown -R appuser:appuser /app
-USER appuser
+RUN chmod +x /usr/local/bin/serve
+
+# This image runs as root, unlike the GCP one. SageMaker Serverless Inference
+# fails to provision a container that switches to a non-root user: the endpoint
+# reports only "Request to service failed" and never writes a container log.
+# Verified by bisection against this same image with the USER line removed and
+# nothing else changed, which reached InService.
 
 EXPOSE 8080
 
-# ENTRYPOINT, not CMD: SageMaker starts the container as `docker run <image> serve`,
-# which would replace a CMD entirely. The extra argument lands on $0 and is ignored.
-# SAGEMAKER_BIND_TO_PORT is set by SageMaker; PORT covers local runs.
-ENTRYPOINT ["sh", "-c", "uvicorn credit_policy_studio.api:app --host 0.0.0.0 --port ${SAGEMAKER_BIND_TO_PORT:-$PORT}"]
+# `serve` is the name SageMaker invokes; CMD covers hosts that pass no arguments.
+CMD ["serve"]
