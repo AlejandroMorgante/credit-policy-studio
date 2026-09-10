@@ -23,6 +23,15 @@ revisions, controlled serving, least-privilege access, auditable outputs, and re
 infrastructure. It does not replace legal, compliance, or model-risk review; it gives those functions
 clearer evidence and safer operational controls.
 
+## Product experience
+
+The evaluation laboratory keeps the selected policy revision, run-level metrics, and decision-path
+volumes visible in one workspace. The example below uses only fictional in-memory applicants.
+
+![Evaluation laboratory showing run metrics and decision paths](docs/assets/credit-policy-studio-evaluation.png)
+
+## How it works
+
 ![Credit Policy Studio architecture](docs/assets/credit-policy-studio-architecture.png)
 
 The browser never receives Google Cloud credentials. Its local FastAPI facade invokes the stable
