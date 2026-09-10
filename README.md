@@ -309,8 +309,10 @@ tests/                      Engine, API, and cloud adapter tests
 docs/                       Architecture, data contract, and the AWS port
 ```
 
-Read [the architecture](docs/architecture.md) for trust boundaries and the production evolution,
-and [the data contract](docs/data-contract.md) for the fictional feature meanings.
+Read [the architecture](docs/architecture.md) for the runtime flow, trust boundaries and the
+production evolution on both clouds, [the AWS port](docs/aws-port.md) for the AWS-specific service
+mapping and SQL translation, and [the data contract](docs/data-contract.md) for the fictional feature
+meanings.
 
 ## Contribution quality convention: Apache Magpie
 

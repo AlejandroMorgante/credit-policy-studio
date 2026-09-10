@@ -1,6 +1,10 @@
 # Porting Credit Policy Studio to AWS
 
-This document describes how the current Google Cloud proof of concept is ported to AWS while
+Read [the architecture](architecture.md) first: it describes the runtime flow, the policy publication
+model, the explainability contract and the trust boundaries once, for both clouds. This document is
+the AWS-specific companion — what each Google Cloud service maps to, and where the mechanism differs.
+
+It describes how the current Google Cloud proof of concept is ported to AWS while
 keeping the existing GCP path working. The application already isolates every cloud dependency
 behind three seams, so the port adds adapters instead of rewriting the domain.
 
