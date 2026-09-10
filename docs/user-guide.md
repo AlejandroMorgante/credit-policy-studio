@@ -6,13 +6,11 @@ versión productiva.
 
 ## Conceptos básicos
 
-- **Borrador:** cambios que viven en el navegador. `Aplicar cambios` actualiza el árbol visible, pero
-  no crea una versión ni afecta ejecuciones externas. Si se recarga la página antes de crear una
-  versión, el borrador se pierde.
 - **Versión candidata:** línea de trabajo guardada para evaluación. Puede actualizarse varias veces
-  sin cambiar su número; cada guardado conserva una revisión identificada por su SHA-256.
+  sin cambiar su número. `Aplicar cambios` guarda de inmediato en la candidata seleccionada y cada
+  guardado conserva una revisión identificada por su SHA-256.
 - **Versión productiva:** versión resuelta por defecto por el endpoint cuando un consumidor no pide
-  una versión concreta.
+  una versión concreta. Puede inspeccionarse en Política, pero no editarse.
 - **Corrida:** una evaluación de una versión sobre un conjunto acotado del dataset. Tiene un `run_id`
   único. Cada versión conserva su lista de corridas, pero la pantalla muestra una sola a la vez y no
   suma resultados de ejecuciones distintas.
@@ -20,19 +18,20 @@ versión productiva.
 ## Crear una versión
 
 1. Abrí **Política**.
-2. Seleccioná un nodo del árbol.
-3. Modificá el nombre, variable, operador o umbral en el panel derecho.
-4. Elegí **Aplicar al borrador**. Repetí el proceso en los nodos necesarios.
-5. Elegí **Validar**. El árbol debe tener referencias válidas, campos permitidos y no contener ciclos.
-6. Elegí **Guardar versión**.
-7. Ingresá un identificador único, por ejemplo `2026-09-09.2`, y el responsable.
+2. En **Versión a editar**, elegí la política que querés usar como base.
+3. Si es productiva, elegí **Crear nueva versión** e ingresá un identificador único, por ejemplo
+   `2026-09-09.2`, y el responsable.
+4. Seleccioná un nodo y modificá el nombre, variable, operador o umbral en el panel derecho.
+5. Elegí **Aplicar cambios**. El cambio se guarda en esa candidata; repetí el proceso en los nodos
+   necesarios.
+6. Elegí **Validar**. El árbol debe tener referencias válidas, campos permitidos y no contener ciclos.
 
 La nueva candidata queda disponible en **Versiones** y en el selector de Evaluación, pero no reemplaza
 la productiva. La cabecera muestra por separado la versión de trabajo y la versión productiva actual.
 
-Para seguir experimentando sobre esa candidata, volvé a Política, aplicá nuevos cambios y elegí
-**Guardar cambios**. No se solicita otro número. **Guardar como nueva versión** queda disponible para
-abrir otra línea de trabajo.
+Para seguir experimentando, dejá esa candidata seleccionada en **Versión a editar**. No se solicita
+otro número por cada ajuste: **Aplicar cambios** actualiza la misma versión. **Crear nueva versión**
+queda disponible para abrir otra línea de trabajo.
 
 ## Evaluar una versión
 
@@ -49,8 +48,7 @@ abrir otra línea de trabajo.
    - los resultados conservan versión y SHA-256 para auditoría.
 
 Volver a ejecutar reemplaza la corrida visible, pero no borra el historial persistido en BigQuery.
-Si iniciás una evaluación con cambios todavía sin versionar, la aplicación solicita primero el nombre
-de la nueva versión y luego abre Evaluación automáticamente.
+Al abrir Evaluación desde Política, la candidata que estabas editando queda seleccionada por defecto.
 
 ## Promover una versión a producción
 
@@ -75,8 +73,9 @@ históricas.
 - **Evaluar** abre el JSON exacto de esa versión en el laboratorio.
 - **Corrida visible** enumera las corridas de la versión seleccionada y permite inspeccionarlas una a
   la vez.
-- Cambiar la versión evaluada no reemplaza el borrador del editor. Al volver a Política, el workspace
-  restaura los cambios y el nodo seleccionado.
+- **Editar** abre una candidata en Política. **Ver** abre la productiva en modo de sólo lectura.
+- Cambiar la versión evaluada no cambia la **Versión a editar**. Al volver a Política, el editor
+  restaura esa versión y el nodo seleccionado.
 
 ## Qué sucede en Google Cloud
 

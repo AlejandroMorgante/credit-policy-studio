@@ -6,11 +6,11 @@ const state = {
   versions: [],
   runs: [],
   activeVersion: null,
-  dirty: false,
-  evaluateAfterPublish: false,
+  editingVersion: null,
   editorDraft: null,
   editorSelected: null,
   pendingPromotionVersion: null,
+  dashboardRequest: 0,
 };
 const viewportState = {
   x: 0,
@@ -303,34 +303,94 @@ function updateMetrics(data) {
     : "Esta versión todavía no tiene una corrida";
 }
 
+function setMetricsLoading(loading, label = "Actualizando métricas…") {
+  const element = $("#metrics-loading");
+  element.hidden = !loading;
+  $("#metrics-loading-label").textContent = label;
+  $(".impact-summary").setAttribute("aria-busy", String(loading));
+}
+
+function setEvaluationState(stage) {
+  const status = $("#evaluation-status");
+  const button = $("#run-button");
+  const states = {
+    starting: ["Preparando evaluación…", "Validando la versión y el dataset."],
+    running: ["Ejecutando evaluación…", "Vertex AI está procesando los usuarios."],
+    results: ["Cargando resultados…", "Actualizando métricas y recorridos."],
+    success: ["Evaluación lista", "Las métricas corresponden a esta corrida."],
+    error: ["No se pudo completar", "Revisá el mensaje de error e intentá nuevamente."],
+  };
+  if (!stage) {
+    status.hidden = true;
+    status.removeAttribute("data-stage");
+    button.disabled = false;
+    button.innerHTML = '<svg viewBox="0 0 24 24"><path d="m9 7 8 5-8 5z"></path></svg> Iniciar evaluación';
+    return;
+  }
+  const [title, detail] = states[stage];
+  status.hidden = false;
+  status.dataset.stage = stage;
+  $("#evaluation-status-title").textContent = title;
+  $("#evaluation-status-detail").textContent = detail;
+  const busy = ["starting", "running", "results"].includes(stage);
+  button.disabled = busy;
+  button.innerHTML = busy
+    ? `<span class="spinner button-spinner" aria-hidden="true"></span>${title.replace("…", "")}`
+    : '<svg viewBox="0 0 24 24"><path d="m9 7 8 5-8 5z"></path></svg> Iniciar evaluación';
+}
+
 async function refreshDashboard(runId = null, policyVersion = state.policy?.metadata.version) {
+  const requestId = ++state.dashboardRequest;
   const query = new URLSearchParams();
   if (runId) query.set("run_id", runId);
   else if (policyVersion) query.set("policy_version", policyVersion);
-  state.dashboard = await api(`/api/dashboard?${query.toString()}`);
-  updateMetrics(state.dashboard);
-  renderTree();
+  setMetricsLoading(true);
+  try {
+    const dashboard = await api(`/api/dashboard?${query.toString()}`);
+    if (requestId !== state.dashboardRequest) return;
+    state.dashboard = dashboard;
+    updateMetrics(state.dashboard);
+    renderTree();
+  } finally {
+    if (requestId === state.dashboardRequest) setMetricsLoading(false);
+  }
 }
 
 function syncVersionUi() {
-  const selectedVersion = state.policy?.metadata.version;
+  const selectedVersion = state.mode === "edit"
+    ? state.editingVersion
+    : state.policy?.metadata.version;
   const isProductive = selectedVersion === state.activeVersion;
-  const isSaved = state.versions.some((item) => item.version === selectedVersion);
   const isHistoricalRun = state.mode === "impact" && Boolean($("#run-select")?.value);
   $("#production-context").textContent = `Producción · v${state.activeVersion || "—"}`;
   $("#version-pill").innerHTML = state.mode === "edit"
-    ? `<i></i> ${state.dirty ? "Borrador custom · base" : "Versión"} · v${selectedVersion || "—"}`
+    ? `<i></i> ${isProductive ? "Solo lectura" : "Editando"} · v${selectedVersion || "—"}`
     : `<i></i> Evaluando · v${selectedVersion || "—"}`;
   $("#version-kind").textContent = isHistoricalRun
     ? "Revisión usada por la corrida"
     : (isProductive ? "Versión productiva" : "Versión candidata");
   $("#header-status").textContent = state.mode === "edit"
-    ? (state.dirty ? "Sin versionar" : (isProductive ? "Productiva" : "Candidata"))
+    ? (isProductive ? "Productiva · bloqueada" : "Candidata")
     : (isHistoricalRun ? "Histórica" : (isProductive ? "Productiva" : "Candidata"));
   $("#promote-button").hidden = state.mode !== "impact" || isProductive || isHistoricalRun;
-  $("#publish-button").textContent = state.dirty && isSaved && !isProductive
-    ? "Guardar cambios"
-    : "Guardar como nueva versión";
+  $("#publish-button").textContent = "Crear nueva versión";
+  syncEditorLock();
+}
+
+function syncEditorLock() {
+  const isProductive = state.editingVersion === state.activeVersion;
+  const locked = state.mode === "impact" || isProductive;
+  $$("#node-form input, #node-form select, #node-form button").forEach((control) => {
+    control.disabled = locked;
+  });
+  const kind = $("#editor-version-kind");
+  const guidance = $("#editor-guidance");
+  if (!kind || !guidance) return;
+  kind.textContent = isProductive ? "Productiva · sólo lectura" : "Candidata · editable";
+  guidance.classList.toggle("locked", isProductive);
+  guidance.innerHTML = isProductive
+    ? "<strong>Versión productiva protegida</strong><span>Podés inspeccionarla o crear una candidata a partir de ella, pero no modificarla.</span>"
+    : "<strong>Candidata editable</strong><span>Aplicar guarda el cambio en esta versión. Producción no se modifica.</span>";
 }
 
 function renderVersionLibrary() {
@@ -341,6 +401,7 @@ function renderVersionLibrary() {
     return `<article class="version-item${item.active ? " productive" : ""}">
       <div class="version-item-main"><i></i><div><strong>v${item.version}</strong><small>${date} · ${item.created_by}</small></div></div>
       <div class="version-item-actions"><span class="version-state">${item.active ? "Productiva" : "Candidata"}</span>
+        <button class="button secondary" type="button" data-edit-version="${item.version}">${item.active ? "Ver" : "Editar"}</button>
         <button class="button secondary" type="button" data-evaluate-version="${item.version}">Evaluar</button>
         ${item.active ? "" : `<button class="button promote" type="button" data-promote-version="${item.version}">Productivizar</button>`}
       </div>
@@ -348,16 +409,38 @@ function renderVersionLibrary() {
   }).join("");
 }
 
-async function loadVersions(selectedVersion = state.policy?.metadata.version) {
+async function loadVersions({ evaluationVersion = null, editingVersion = state.editingVersion } = {}) {
+  const priorEvaluation = $("#version-select").value;
   state.versions = await api("/api/policies");
   state.activeVersion = state.versions.find((item) => item.active)?.version || null;
-  $("#version-select").innerHTML = state.versions.map((item) =>
-    `<option value="${item.version}">${item.version}${item.active ? " · Productiva" : ""}</option>`
+  const options = state.versions.map((item) =>
+    `<option value="${item.version}">${item.version}${item.active ? " · Productiva" : " · Candidata"}</option>`
   ).join("");
-  if (selectedVersion && state.versions.some((item) => item.version === selectedVersion)) {
-    $("#version-select").value = selectedVersion;
-  }
+  $("#version-select").innerHTML = options;
+  $("#editor-version-select").innerHTML = options;
+  const exists = (version) => state.versions.some((item) => item.version === version);
+  const rememberedEditor = window.localStorage.getItem("credit-policy-editor-version");
+  state.editingVersion = [editingVersion, rememberedEditor].find(exists)
+    || state.versions.find((item) => !item.active)?.version
+    || state.activeVersion;
+  const selectedEvaluation = [evaluationVersion, priorEvaluation, state.editingVersion]
+    .find(exists) || state.activeVersion;
+  $("#editor-version-select").value = state.editingVersion;
+  $("#version-select").value = selectedEvaluation;
   renderVersionLibrary();
+  syncVersionUi();
+}
+
+async function loadEditorVersion(version) {
+  state.policy = await api(`/api/policies/${encodeURIComponent(version)}`);
+  state.editingVersion = version;
+  state.selected = state.policy.root_node;
+  state.editorDraft = structuredClone(state.policy);
+  state.editorSelected = state.selected;
+  window.localStorage.setItem("credit-policy-editor-version", version);
+  $("#editor-version-select").value = version;
+  viewportState.initialized = false;
+  selectNode(state.selected);
   syncVersionUi();
 }
 
@@ -403,22 +486,42 @@ async function initialize() {
   const options = Object.entries(fieldLabels).map(([value, label]) => `<option value="${value}">${label}</option>`).join("");
   $("#node-field").innerHTML = options;
   state.policy = await api("/api/policy");
-  await loadVersions(state.policy.metadata.version);
-  state.selected = state.policy.root_node; selectNode(state.selected);
-  state.editorDraft = structuredClone(state.policy);
-  state.editorSelected = state.selected;
-  await loadRuns(state.policy.metadata.version);
+  await loadVersions({ evaluationVersion: state.policy.metadata.version });
+  await loadEditorVersion(state.editingVersion);
+  await loadRuns($("#version-select").value);
   if (new URLSearchParams(window.location.search).get("view") === "impact") await setMode("impact");
 }
 
-$("#node-form").addEventListener("submit", (event) => {
-  event.preventDefault(); const node = state.policy.nodes[state.selected]; node.label = $("#node-label").value.trim();
+$("#node-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (state.editingVersion === state.activeVersion) {
+    toast("La versión productiva es de solo lectura", true);
+    return;
+  }
+  const policy = structuredClone(state.policy);
+  const node = policy.nodes[state.selected]; node.label = $("#node-label").value.trim();
   if (node.type === "condition") { node.field = $("#node-field").value; node.operator = $("#node-operator").value; node.value = Number($("#node-value").value); }
   else { node.decision = $("#node-decision").value; node.risk_band = $("#node-band").value; node.credit_limit = Number($("#node-limit").value); }
-  state.dirty = true;
-  state.editorDraft = structuredClone(state.policy);
-  state.editorSelected = node.id;
-  selectNode(node.id); syncVersionUi(); toast("Cambio aplicado al borrador");
+  const button = $(".apply-button");
+  button.disabled = true;
+  button.textContent = "Guardando…";
+  try {
+    await api(`/api/policies/${encodeURIComponent(state.editingVersion)}`, {
+      method: "PUT",
+      body: JSON.stringify({ policy }),
+    });
+    state.policy = policy;
+    state.editorDraft = structuredClone(policy);
+    state.editorSelected = node.id;
+    selectNode(node.id);
+    await loadVersions({ editingVersion: state.editingVersion });
+    toast(`Cambio guardado en la candidata ${state.editingVersion}`);
+  } catch (error) {
+    toast(`No se pudo guardar el cambio: ${error.message}`, true);
+  } finally {
+    button.textContent = "Aplicar cambios";
+    syncEditorLock();
+  }
 });
 
 $("#validate-button").addEventListener("click", async () => {
@@ -426,36 +529,14 @@ $("#validate-button").addEventListener("click", async () => {
   catch (error) { toast(`No es válida: ${error.message}`, true); }
 });
 
-function openNewVersionDialog(evaluateAfterPublish = false) {
-  state.evaluateAfterPublish = evaluateAfterPublish;
+function openNewVersionDialog() {
   $("#publish-version").value = "";
   $("#publish-author").value = state.policy.metadata.created_by;
   $("#publish-dialog").showModal();
 }
 
-async function saveCandidateChanges() {
-  const version = state.policy.metadata.version;
-  await api(`/api/policies/${encodeURIComponent(version)}`, {
-    method: "PUT",
-    body: JSON.stringify({ policy: state.policy }),
-  });
-  state.dirty = false;
-  state.editorDraft = structuredClone(state.policy);
-  state.editorSelected = state.selected;
-  await loadVersions(version);
-  syncVersionUi();
-  toast(`Cambios guardados en la candidata ${version}`);
-}
-
-$("#publish-button").addEventListener("click", async () => {
-  const isProductive = state.policy.metadata.version === state.activeVersion;
-  const isSaved = state.versions.some((item) => item.version === state.policy.metadata.version);
-  if (state.dirty && isSaved && !isProductive) {
-    try { await saveCandidateChanges(); }
-    catch (error) { toast(`No se pudieron guardar los cambios: ${error.message}`, true); }
-    return;
-  }
-  openNewVersionDialog(false);
+$("#publish-button").addEventListener("click", () => {
+  openNewVersionDialog();
 });
 
 $("#publish-form").addEventListener("submit", async (event) => {
@@ -465,52 +546,44 @@ $("#publish-form").addEventListener("submit", async (event) => {
   try {
     await api("/api/policies/publish", { method: "POST", body: JSON.stringify({ policy }) });
     state.policy = policy;
-    state.dirty = false;
+    state.editingVersion = policy.metadata.version;
     state.editorDraft = structuredClone(policy);
     state.editorSelected = state.selected;
-    await loadVersions(policy.metadata.version);
+    window.localStorage.setItem("credit-policy-editor-version", policy.metadata.version);
+    await loadVersions({ evaluationVersion: policy.metadata.version, editingVersion: policy.metadata.version });
     $("#publish-dialog").close(); renderTree(); toast(`Versión ${policy.metadata.version} creada · producción no cambió`);
-    if (state.evaluateAfterPublish) {
-      state.evaluateAfterPublish = false;
-      await setMode("impact");
-      await executeEvaluation();
-    }
   } catch (error) { toast(`No se pudo crear la versión: ${error.message}`, true); }
 });
 
 async function executeEvaluation() {
-  const button = $("#run-button"); button.disabled = true; button.textContent = "Ejecutando…";
+  setEvaluationState("starting");
+  await new Promise((resolve) => window.requestAnimationFrame(resolve));
   try {
+    if (state.mode !== "impact") await setMode("impact");
+    setEvaluationState("running");
     const result = await api("/api/runs", { method: "POST", body: JSON.stringify({ instances: [{}], parameters: { limit: Number($("#run-limit").value), policy_version: state.policy.metadata.version } }) });
+    setEvaluationState("results");
     await loadRuns(result.policy_version, result.run_id);
+    setEvaluationState("success");
     toast(`${result.processed_rows} usuarios · versión ${result.policy_version}`);
+    window.setTimeout(() => {
+      if ($("#evaluation-status").dataset.stage === "success") setEvaluationState(null);
+    }, 2800);
   }
-  catch (error) { toast(`Falló la ejecución: ${error.message}`, true); }
-  finally { button.disabled = false; button.innerHTML = '<svg viewBox="0 0 24 24"><path d="m9 7 8 5-8 5z"></path></svg> Iniciar evaluación'; }
+  catch (error) {
+    setEvaluationState("error");
+    toast(`Falló la ejecución: ${error.message}`, true);
+  }
 }
 
-$("#run-button").addEventListener("click", async () => {
-  if (state.dirty) {
-    const isProductive = state.policy.metadata.version === state.activeVersion;
-    const isSaved = state.versions.some((item) => item.version === state.policy.metadata.version);
-    if (isSaved && !isProductive) {
-      try { await saveCandidateChanges(); }
-      catch (error) { toast(`No se pudieron guardar los cambios: ${error.message}`, true); return; }
-    } else {
-      openNewVersionDialog(true);
-      toast("Guardá una candidata para evaluar estos cambios");
-      return;
-    }
-  }
-  if (state.mode !== "impact") await setMode("impact");
-  await executeEvaluation();
-});
+$("#run-button").addEventListener("click", executeEvaluation);
 
 async function setMode(mode) {
   if (mode === state.mode) return;
   if (state.mode === "edit" && mode === "impact") {
     state.editorDraft = structuredClone(state.policy);
     state.editorSelected = state.selected;
+    $("#version-select").value = state.editingVersion;
   }
   state.mode = mode;
   document.body.dataset.mode = mode;
@@ -520,7 +593,6 @@ async function setMode(mode) {
   $("#canvas-subtitle").textContent = mode === "impact"
     ? "El volumen muestra por dónde recorrieron la política los usuarios analizados."
     : "Seleccioná un nodo para editar su regla.";
-  $$("#node-form input, #node-form select, #node-form button").forEach((control) => { control.disabled = mode === "impact"; });
   if (mode === "impact") {
     const evaluationVersion = $("#version-select").value || state.activeVersion;
     await loadPolicyVersion(evaluationVersion);
@@ -543,12 +615,20 @@ $$('.nav-item').forEach((button) => button.addEventListener("click", async () =>
 }));
 
 $("#version-select").addEventListener("change", async (event) => {
+  setMetricsLoading(true, "Cargando versión…");
   try { await loadPolicyVersion(event.target.value); }
   catch (error) { toast(`No se pudo cargar la versión: ${error.message}`, true); }
+  finally { setMetricsLoading(false); }
+});
+
+$("#editor-version-select").addEventListener("change", async (event) => {
+  try { await loadEditorVersion(event.target.value); }
+  catch (error) { toast(`No se pudo abrir la versión para editar: ${error.message}`, true); }
 });
 
 $("#run-select").addEventListener("change", async (event) => {
   const version = $("#version-select").value;
+  setMetricsLoading(true, "Cargando corrida…");
   try {
     if (!event.target.value) {
       await loadPolicyVersion(version, null, false);
@@ -563,6 +643,7 @@ $("#run-select").addEventListener("change", async (event) => {
     syncVersionUi();
   }
   catch (error) { toast(`No se pudo cargar la corrida: ${error.message}`, true); }
+  finally { setMetricsLoading(false); }
 });
 
 function openPromotion(version) {
@@ -579,7 +660,10 @@ $("#promote-form").addEventListener("submit", async (event) => {
   const version = state.pendingPromotionVersion;
   try {
     await api(`/api/policies/${encodeURIComponent(version)}/activate`, { method: "POST" });
-    await loadVersions(state.policy.metadata.version);
+    await loadVersions({
+      evaluationVersion: state.policy.metadata.version,
+      editingVersion: state.editingVersion,
+    });
     $("#promote-dialog").close();
     toast(`Versión ${version} promovida a productiva`);
   } catch (error) { toast(`No se pudo promover: ${error.message}`, true); }
@@ -589,12 +673,18 @@ $("#versions-button").addEventListener("click", () => $("#versions-dialog").show
 $("#versions-close").addEventListener("click", () => $("#versions-dialog").close());
 $("#new-version-button").addEventListener("click", () => {
   $("#versions-dialog").close();
-  openNewVersionDialog(false);
+  openNewVersionDialog();
 });
 $("#versions-list").addEventListener("click", async (event) => {
+  const editButton = event.target.closest("[data-edit-version]");
   const evaluateButton = event.target.closest("[data-evaluate-version]");
   const promoteButton = event.target.closest("[data-promote-version]");
-  if (evaluateButton) {
+  if (editButton) {
+    const version = editButton.dataset.editVersion;
+    $("#versions-dialog").close();
+    if (state.mode !== "edit") await setMode("edit");
+    await loadEditorVersion(version);
+  } else if (evaluateButton) {
     const version = evaluateButton.dataset.evaluateVersion;
     $("#version-select").value = version;
     $("#versions-dialog").close();

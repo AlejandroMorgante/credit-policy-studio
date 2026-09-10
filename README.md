@@ -1,9 +1,34 @@
 # Credit Policy Studio
 
-A polished proof of concept for editing, versioning, executing, and explaining deterministic credit
-decision policies on Google Cloud. Business users work with a visual tree; a Python runtime reads a
-cohort from BigQuery, evaluates an explicitly selected candidate or the productive JSON policy,
-writes auditable results back to BigQuery, and returns the exact version and hash used by the run.
+![Architecture](https://img.shields.io/badge/GCP-Vertex_AI_%7C_BigQuery_%7C_GCS-ef895e)
+![Python](https://img.shields.io/badge/Python-3.11%2B-3a3530)
+![License](https://img.shields.io/badge/license-MIT-dceadf)
+
+Credit Policy Studio gives business teams a visual laboratory for designing, versioning, evaluating,
+and promoting deterministic credit policies without writing code. Every execution remains
+explainable and traceable to an exact policy version, content hash, run, and decision path.
+
+## Why this exists
+
+Credit decisions sit under a difficult constraint: they must be consistent, reviewable, and
+explainable, while the people who understand the policy best are not always software engineers.
+Deterministic decision trees support interpretability, but changing them through Python, JSON, or
+deployment pipelines creates technical dependency, slows experimentation, and makes governance
+harder to see.
+
+This proof of concept closes that gap. Business users edit a protected visual policy, evaluate a
+candidate against a controlled cohort, inspect where applicants flowed through the tree, and promote
+it explicitly. Underneath, a production-shaped Google Cloud architecture provides immutable policy
+revisions, controlled serving, least-privilege access, auditable outputs, and reproducible
+infrastructure. It does not replace legal, compliance, or model-risk review; it gives those functions
+clearer evidence and safer operational controls.
+
+![Credit Policy Studio architecture](docs/assets/credit-policy-studio-architecture.png)
+
+The browser never receives Google Cloud credentials. Its local FastAPI facade invokes the stable
+Vertex AI endpoint using Application Default Credentials; Vertex reads the selected policy and
+applicant cohort, then persists the result, trace, version, and run metadata used by the impact
+dashboard.
 
 ## Current POC scope
 
@@ -49,6 +74,27 @@ API key, service-account key, or public web endpoint is created for the current 
 > Every person, score, rule, and outcome in this repository is fictional. This software is a UX and
 > architecture demonstration, not a credit policy and not suitable for real lending decisions.
 
+## AWS infrastructure at a glance
+
+The same application also runs on AWS. `CLOUD_PROVIDER=aws` selects a second set of adapters; the
+decision engine, the API contract, the policy JSON, and the UI are identical on both clouds.
+
+| Service | AWS responsibility | Replaces | Created now? |
+| --- | --- | --- | --- |
+| S3 (policies) | Immutable SHA-addressed policies and the active pointer, using bucket versioning and conditional writes. | Cloud Storage | Yes |
+| S3 (data) | Applicant cohort, one result object per run, run metadata, and Athena query output. | BigQuery storage | Yes |
+| Athena + Glue Data Catalog | Queries the cohort and the dashboard aggregates over external JSON tables. | BigQuery compute | Yes |
+| SageMaker Endpoint | Hosts the same scoring container and starts one synchronous run per request. | Vertex AI Endpoint | No (`deploy_endpoint=false`) |
+| ECR | Stores the container image, built locally and pushed. | Artifact Registry + Cloud Build | Yes |
+| IAM role | Gives the SageMaker runtime read access to policies and read/write access to the data bucket, Athena, and Glue. | Service account | Yes |
+
+`scoring_results` is partitioned by `run_id` using **partition projection**, so no crawler and no
+`MSCK REPAIR` are needed: Athena derives the S3 prefix from the `WHERE` clause. Every dashboard
+query filters by `run_id`, which is what makes this possible.
+
+Writes are plain `PutObject` calls of newline-delimited JSON, one object per run, rather than DML.
+That avoids the Athena query-size limit on large decision traces and any table maintenance.
+
 ## What is included
 
 - A typed Python decision engine with graph, reference, and cycle validation.
@@ -64,9 +110,10 @@ API key, service-account key, or public web endpoint is created for the current 
 
 The product behaves as a small policy laboratory:
 
-1. Edit rules in **Política** and apply them to the browser draft.
-2. Validate and create a candidate version. Iterate on that candidate without changing its business
-   version; each saved revision remains addressable by its SHA-256. Production does not change.
+1. In **Política**, explicitly select the **Versión a editar**. Productive versions are visible but
+   read-only; create a candidate before changing one.
+2. Edit a rule and apply it. Each apply persists to that same candidate and creates an addressable
+   SHA-256 revision without changing production.
 3. Open **Evaluación**, select any version, and run it against the test dataset.
 4. Browse all runs for that version and inspect one at a time. Dashboard figures are filtered by
    `run_id` and never accumulate multiple runs in the visible result.
@@ -75,16 +122,12 @@ The product behaves as a small policy laboratory:
 
 The `?` button in the application opens the same flow as an in-product quick guide. See the complete
 [business-user guide](docs/user-guide.md), including rollback semantics and the distinction between
-applying a draft, creating a version, evaluating it, and promoting it.
+editing a candidate, creating a version, evaluating it, and promoting it.
 
 The **Versiones** library lists every policy and its Productiva/Candidata state. Candidates can be
-updated repeatedly; productive versions are frozen. Evaluation
+updated repeatedly through the explicit editor selector; productive versions are frozen. Evaluation
 also lists every run for the selected version; choosing a run filters the dashboard by its exact
 `run_id`. Switching versions never overwrites the in-progress editor workspace.
-
-![Architecture](https://img.shields.io/badge/GCP-Vertex_AI_%7C_BigQuery_%7C_GCS-ef895e)
-![Python](https://img.shields.io/badge/Python-3.11%2B-3a3530)
-![License](https://img.shields.io/badge/license-MIT-dceadf)
 
 ## Local demo
 
@@ -99,6 +142,26 @@ make run
 Open <http://localhost:8080>. Without `VERTEX_ENDPOINT_ID`, local mode uses eight in-memory fictional
 applicants. Edit a threshold, create a candidate version, open **Evaluación**, select it, run the
 dataset, and promote it only if the result is acceptable.
+
+## Disposable POC lifecycle
+
+The Makefile creates the POC with BigQuery deletion protection disabled and permits Terraform to
+empty the application-owned bucket and dataset during teardown. This behavior is intentionally
+limited to disposable environments; run with `POC_DESTROYABLE=false` to retain the safer Terraform
+defaults.
+
+To remove the complete application stack, including deployed Vertex models that are created outside
+Terraform, provide the exact project ID as a guard:
+
+```bash
+make destroy PROJECT_ID=your-project-id CONFIRM_DESTROY=your-project-id
+```
+
+The command undeploys models from the Terraform-managed endpoint, deletes Vertex models labelled for
+this application, and then destroys the endpoint, Artifact Registry repository and images, BigQuery
+tables and dataset, versioned policy bucket, service accounts, and IAM grants. Required project APIs
+remain enabled because they may be shared by other workloads; Cloud Build history and provider audit
+logs follow their normal GCP retention policies.
 
 To use the real POC flow from localhost, create an ignored `.env` from `.env.example` and set:
 
@@ -192,8 +255,28 @@ disabled by default (`deploy_endpoint=false`). Everything else is pay-per-use: A
 stored object. Point the local UI at the endpoint with `CLOUD_PROVIDER=aws`, `POLICY_BUCKET`,
 `DATA_BUCKET`, and `SAGEMAKER_ENDPOINT_NAME` in `.env`.
 
-See [the AWS port](docs/aws-port.md) for the service mapping, the BigQuery-to-Trino SQL
-translation, and the S3 conditional-write equivalents of GCS object generations.
+By default the endpoint uses **serverless inference**, which bills per invocation with no idle cost
+and needs no per-instance quota. Set `endpoint_instance_type` to provision a dedicated instance
+instead; `ml.c6i.large` is the cheapest current-generation x86 option at about USD 74 per month.
+T2 and T3 are not offered for SageMaker hosting at all.
+
+Everything else is pay-per-use: Athena bills per byte scanned with a 10 MB minimum per query, and S3
+per stored object. A full verification run of this POC — provisioning, seeding, several scoring runs
+and dashboard loads — scanned 101 KB across 16 queries and cost well under a cent.
+
+To remove every AWS resource, mirroring `make destroy` on the GCP side:
+
+```bash
+make aws-destroy
+```
+
+Terraform reads `force_destroy` from state rather than from the destroy invocation, so the target
+applies the flag first and then destroys. Without that, non-empty buckets and an Athena workgroup
+holding query history both refuse to delete.
+
+See [the AWS port](docs/aws-port.md) for the full service mapping, the BigQuery-to-Trino SQL
+translation, the S3 conditional-write equivalents of GCS object generations, and the SageMaker
+container contract.
 
 ## Future: expose the UI with Cloud Run
 
@@ -215,6 +298,7 @@ browser code.
 
 ```text
 src/credit_policy_studio/   Python engine, API, and the GCP and AWS adapters
+docker/serve                Container entry point both clouds invoke
 policies/                   Example versioned decision policy
 web/                        Visual editor and impact dashboard
 infra/                      Terraform for GCP and BigQuery schemas

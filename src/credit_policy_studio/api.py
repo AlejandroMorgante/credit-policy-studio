@@ -149,6 +149,8 @@ def publish_policy(
 ) -> dict[str, str | int]:
     try:
         return repository.publish(request.policy)
+    # GcsObjectStore and S3ObjectStore both translate a failed create-only write
+    # into FileExistsError, so no cloud exception reaches this layer.
     except FileExistsError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
 
