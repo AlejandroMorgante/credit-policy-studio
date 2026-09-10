@@ -13,6 +13,14 @@ bucket="$(terraform -chdir=infra output -raw policy_bucket)"
 dataset="$(terraform -chdir=infra output -raw bigquery_dataset)"
 release="$(date -u +%Y%m%d-%H%M%S)"
 display_name="credit-policy-${release}"
+previous_deployments="$(mktemp)"
+trap 'rm -f "${previous_deployments}"' EXIT
+
+gcloud ai endpoints describe "${endpoint}" \
+  --project="${PROJECT_ID}" \
+  --region="${REGION}" \
+  --flatten='deployedModels[]' \
+  --format='value(deployedModels.id)' >"${previous_deployments}"
 
 gcloud ai models upload \
   --project="${PROJECT_ID}" \
@@ -48,5 +56,16 @@ gcloud ai endpoints deploy-model "${endpoint}" \
   --max-replica-count=2 \
   --service-account="${runtime_sa}" \
   --traffic-split=0=100
+
+while IFS= read -r deployed_model_id; do
+  if [[ -z "${deployed_model_id}" ]]; then
+    continue
+  fi
+  gcloud ai endpoints undeploy-model "${endpoint}" \
+    --project="${PROJECT_ID}" \
+    --region="${REGION}" \
+    --deployed-model-id="${deployed_model_id}" \
+    --quiet
+done <"${previous_deployments}"
 
 echo "Deployed ${model} to ${endpoint}"

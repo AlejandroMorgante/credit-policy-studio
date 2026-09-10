@@ -117,3 +117,23 @@ def test_productive_policy_cannot_be_updated_through_api(tmp_path, monkeypatch) 
 
     assert response.status_code == 409
     assert policies.get_active().nodes["bureau-floor"].value != 999
+
+
+def test_duplicate_policy_version_returns_conflict(tmp_path, monkeypatch) -> None:
+    from pathlib import Path
+
+    monkeypatch.chdir(tmp_path)
+    source = Path(__file__).parents[1] / "policies" / "credit_policy_v1.json"
+    policies = LocalPolicyRepository(source)
+    policy = policies.get_active()
+    app.dependency_overrides[get_policy_repository] = lambda: policies
+
+    try:
+        response = TestClient(app).post(
+            "/api/policies/publish",
+            json={"policy": policy.model_dump(mode="json")},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 409

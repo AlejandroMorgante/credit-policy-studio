@@ -215,7 +215,9 @@ class BigQueryWarehouse:
         return len(payload)
 
     def write_run(self, summary: RunSummary) -> None:
-        errors = self.client.insert_rows_json(self.runs_table, [summary.model_dump(mode="json")])
+        row = summary.model_dump(mode="json")
+        row["decisions"] = json.dumps(row["decisions"], separators=(",", ":"))
+        errors = self.client.insert_rows_json(self.runs_table, [row])
         if errors:
             raise RuntimeError(f"BigQuery rejected run metadata: {errors}")
 

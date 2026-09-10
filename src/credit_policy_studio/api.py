@@ -6,6 +6,7 @@ from typing import Annotated
 from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from google.api_core.exceptions import PreconditionFailed
 
 from . import __version__
 from .config import Settings, get_settings
@@ -143,7 +144,7 @@ def publish_policy(
 ) -> dict[str, str | int]:
     try:
         return repository.publish(request.policy)
-    except FileExistsError as error:
+    except (FileExistsError, PreconditionFailed) as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
 
 
