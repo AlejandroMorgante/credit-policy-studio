@@ -1,9 +1,34 @@
 # Credit Policy Studio
 
-A polished proof of concept for editing, versioning, executing, and explaining deterministic credit
-decision policies on Google Cloud. Business users work with a visual tree; a Python runtime reads a
-cohort from BigQuery, evaluates an explicitly selected candidate or the productive JSON policy,
-writes auditable results back to BigQuery, and returns the exact version and hash used by the run.
+![Architecture](https://img.shields.io/badge/GCP-Vertex_AI_%7C_BigQuery_%7C_GCS-ef895e)
+![Python](https://img.shields.io/badge/Python-3.11%2B-3a3530)
+![License](https://img.shields.io/badge/license-MIT-dceadf)
+
+Credit Policy Studio gives business teams a visual laboratory for designing, versioning, evaluating,
+and promoting deterministic credit policies without writing code. Every execution remains
+explainable and traceable to an exact policy version, content hash, run, and decision path.
+
+## Why this exists
+
+Credit decisions sit under a difficult constraint: they must be consistent, reviewable, and
+explainable, while the people who understand the policy best are not always software engineers.
+Deterministic decision trees support interpretability, but changing them through Python, JSON, or
+deployment pipelines creates technical dependency, slows experimentation, and makes governance
+harder to see.
+
+This proof of concept closes that gap. Business users edit a protected visual policy, evaluate a
+candidate against a controlled cohort, inspect where applicants flowed through the tree, and promote
+it explicitly. Underneath, a production-shaped Google Cloud architecture provides immutable policy
+revisions, controlled serving, least-privilege access, auditable outputs, and reproducible
+infrastructure. It does not replace legal, compliance, or model-risk review; it gives those functions
+clearer evidence and safer operational controls.
+
+![Credit Policy Studio architecture](docs/assets/credit-policy-studio-architecture.png)
+
+The browser never receives Google Cloud credentials. Its local FastAPI facade invokes the stable
+Vertex AI endpoint using Application Default Credentials; Vertex reads the selected policy and
+applicant cohort, then persists the result, trace, version, and run metadata used by the impact
+dashboard.
 
 ## Current POC scope
 
@@ -82,10 +107,6 @@ The **Versiones** library lists every policy and its Productiva/Candidata state.
 updated repeatedly through the explicit editor selector; productive versions are frozen. Evaluation
 also lists every run for the selected version; choosing a run filters the dashboard by its exact
 `run_id`. Switching versions never overwrites the in-progress editor workspace.
-
-![Architecture](https://img.shields.io/badge/GCP-Vertex_AI_%7C_BigQuery_%7C_GCS-ef895e)
-![Python](https://img.shields.io/badge/Python-3.11%2B-3a3530)
-![License](https://img.shields.io/badge/license-MIT-dceadf)
 
 ## Local demo
 
