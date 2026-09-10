@@ -28,7 +28,9 @@ clearer evidence and safer operational controls.
 The evaluation laboratory keeps the selected policy revision, run-level metrics, and decision-path
 volumes visible in one workspace. The example below uses only fictional in-memory applicants.
 
-![Evaluation laboratory showing run metrics and decision paths](docs/assets/credit-policy-studio-evaluation.png)
+![Animated walkthrough of policy editing and evaluation](docs/assets/credit-policy-studio-demo.gif)
+
+[View the static evaluation screenshot](docs/assets/credit-policy-studio-evaluation.png).
 
 ## How it works
 
