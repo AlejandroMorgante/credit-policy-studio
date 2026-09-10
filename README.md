@@ -76,12 +76,38 @@ not required to demonstrate the current flow.
 | Scheduler / Job runtime | Would automate or decouple large recurring cohorts later. | No |
 
 Terraform also enables the required service APIs. It creates an empty Vertex endpoint, but the
-billable serving replica is created only by `make deploy-model`. No VPC, load balancer, database,
+billable serving replica is created only by `make deploy`. No VPC, load balancer, database,
 API key, service-account key, or public web endpoint is created for the current POC.
 
 > [!WARNING]
 > Every person, score, rule, and outcome in this repository is fictional. This software is a UX and
 > architecture demonstration, not a credit policy and not suitable for real lending decisions.
+
+## AWS infrastructure at a glance
+
+The same application also runs on AWS. `CLOUD_PROVIDER=aws` selects a second set of adapters; the
+decision engine, the API contract, the policy JSON, and the UI are identical on both clouds.
+
+![Credit Policy Studio architecture on AWS](docs/assets/credit-policy-studio-architecture-aws.png)
+
+Compare it with the Google Cloud diagram above: the boxes and arrows are the same, only the managed
+services underneath change.
+
+| Service | AWS responsibility | Replaces | Created now? |
+| --- | --- | --- | --- |
+| S3 (policies) | Immutable SHA-addressed policies and the active pointer, using bucket versioning and conditional writes. | Cloud Storage | Yes |
+| S3 (data) | Applicant cohort, one result object per run, run metadata, and Athena query output. | BigQuery storage | Yes |
+| Athena + Glue Data Catalog | Queries the cohort and the dashboard aggregates over external JSON tables. | BigQuery compute | Yes |
+| SageMaker Endpoint | Hosts the same scoring container and starts one synchronous run per request. | Vertex AI Endpoint | No (`deploy_endpoint=false`) |
+| ECR | Stores the container image, built locally and pushed. | Artifact Registry + Cloud Build | Yes |
+| IAM role | Gives the SageMaker runtime read access to policies and read/write access to the data bucket, Athena, and Glue. | Service account | Yes |
+
+`scoring_results` is partitioned by `run_id` using **partition projection**, so no crawler and no
+`MSCK REPAIR` are needed: Athena derives the S3 prefix from the `WHERE` clause. Every dashboard
+query filters by `run_id`, which is what makes this possible.
+
+Writes are plain `PutObject` calls of newline-delimited JSON, one object per run, rather than DML.
+That avoids the Athena query-size limit on large decision traces and any table maintenance.
 
 ## What is included
 
@@ -203,12 +229,12 @@ export PROJECT_ID=YOUR_PROJECT_ID
 export REGION=us-central1
 
 make tf-init
-make tf-plan                # read the plan before creating resources
-make infra-core             # APIs, IAM, GCS, BigQuery, Artifact Registry, endpoint
+make plan                   # read the plan before creating resources
+make infra                  # APIs, IAM, GCS, BigQuery, Artifact Registry, endpoint
 make upload-policy
 make seed
 make image
-make deploy-model           # creates billable Vertex serving replicas
+make deploy                 # creates billable Vertex serving replicas
 ./scripts/invoke_vertex.sh 100
 ```
 
@@ -216,6 +242,58 @@ The model deployment uses at least one `n1-standard-2` prediction replica and th
 until undeployed. Terraform protects BigQuery tables by default and does not make the UI public.
 The operator applying Terraform needs permission to enable APIs and create the resources above; the
 operator deploying the model must also be allowed to use the Vertex runtime service account.
+
+## Provision the AWS side
+
+Every infrastructure target takes `CLOUD=gcp` (the default) or `CLOUD=aws`, so the same commands
+provision either cloud. The application runs on AWS with `CLOUD_PROVIDER=aws`, which swaps Cloud Storage for S3, BigQuery for
+Athena over the Glue Data Catalog, and Vertex AI for a SageMaker real-time endpoint. Nothing in the
+decision engine, the API, or the UI changes. Credentials come from the standard AWS chain (SSO
+profile, environment, or instance role); the repository stores none.
+
+```bash
+aws sso login                # or export AWS_PROFILE / AWS_ACCESS_KEY_ID
+export AWS_REGION=us-east-1
+
+export CLOUD=aws              # every infrastructure target reads this
+
+make tf-init
+make plan                    # read the plan before creating resources
+make infra                   # S3, Glue tables, Athena workgroup, ECR, runtime IAM role
+make upload-policy
+make seed
+make image
+make deploy                  # creates the SageMaker endpoint
+make undeploy                # removes it again
+```
+
+The SageMaker endpoint is the only always-on cost (about USD 74 per month on `ml.c6i.large`) and is
+disabled by default (`deploy_endpoint=false`). Everything else is pay-per-use: Athena bills per byte scanned and S3 per
+stored object. Point the local UI at the endpoint with `CLOUD_PROVIDER=aws`, `POLICY_BUCKET`,
+`DATA_BUCKET`, and `SAGEMAKER_ENDPOINT_NAME` in `.env`.
+
+By default the endpoint uses **serverless inference**, which bills per invocation with no idle cost
+and needs no per-instance quota. Set `endpoint_instance_type` to provision a dedicated instance
+instead; `ml.c6i.large` is the cheapest current-generation x86 option at about USD 74 per month.
+T2 and T3 are not offered for SageMaker hosting at all.
+
+Everything else is pay-per-use: Athena bills per byte scanned with a 10 MB minimum per query, and S3
+per stored object. A full verification run of this POC — provisioning, seeding, several scoring runs
+and dashboard loads — scanned 101 KB across 16 queries and cost well under a cent.
+
+To remove every AWS resource, mirroring `make destroy` on the GCP side:
+
+```bash
+make destroy CLOUD=aws
+```
+
+Terraform reads `force_destroy` from state rather than from the destroy invocation, so the target
+applies the flag first and then destroys. Without that, non-empty buckets and an Athena workgroup
+holding query history both refuse to delete.
+
+See [the AWS port](docs/aws-port.md) for the full service mapping, the BigQuery-to-Trino SQL
+translation, the S3 conditional-write equivalents of GCS object generations, and the SageMaker
+container contract.
 
 ## Future: expose the UI with Cloud Run
 
@@ -236,18 +314,22 @@ browser code.
 ## Repository map
 
 ```text
-src/credit_policy_studio/   Python engine, repositories, BigQuery adapter, API, Vertex client
+src/credit_policy_studio/   Python engine, API, and the GCP and AWS adapters
+docker/serve                Container entry point both clouds invoke
 policies/                   Example versioned decision policy
 web/                        Visual editor and impact dashboard
-infra/                      Terraform and BigQuery schemas
+infra/                      Terraform for GCP and BigQuery schemas
+infra/aws/                  Terraform for S3, Glue, Athena, ECR, and SageMaker
 sql/                        Synthetic applicant seed
 scripts/                    Policy publication, model deployment, invocation
-tests/                      Engine and Vertex contract tests
-docs/                       Architecture and data contract
+tests/                      Engine, API, and cloud adapter tests
+docs/                       Architecture, data contract, and the AWS port
 ```
 
-Read [the architecture](docs/architecture.md) for trust boundaries and the production evolution,
-and [the data contract](docs/data-contract.md) for the fictional feature meanings.
+Read [the architecture](docs/architecture.md) for the runtime flow, trust boundaries and the
+production evolution on both clouds, [the AWS port](docs/aws-port.md) for the AWS-specific service
+mapping and SQL translation, and [the data contract](docs/data-contract.md) for the fictional feature
+meanings.
 
 ## Contribution quality convention: Apache Magpie
 

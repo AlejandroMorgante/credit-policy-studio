@@ -1,0 +1,12 @@
+#!/bin/sh
+# SageMaker starts inference containers as `docker run <image> serve`, so the
+# image must carry an executable with that name. Vertex AI and local runs reach
+# it through CMD ["serve"] with no arguments, so one path serves every host.
+#
+# SAGEMAKER_BIND_TO_PORT is set by SageMaker; PORT covers Vertex, Cloud Run and
+# local runs.
+set -eu
+
+exec uvicorn credit_policy_studio.api:app \
+  --host 0.0.0.0 \
+  --port "${SAGEMAKER_BIND_TO_PORT:-$PORT}"

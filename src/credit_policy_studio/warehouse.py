@@ -3,8 +3,6 @@ from __future__ import annotations
 import json
 from typing import Any, Protocol
 
-from google.cloud import bigquery
-
 from .models import Applicant, RunSummary, ScoringResult
 
 
@@ -176,8 +174,12 @@ class BigQueryWarehouse:
         input_table: str,
         output_table: str,
         runs_table: str,
-        client: bigquery.Client | None = None,
+        client: Any | None = None,
     ) -> None:
+        # Imported here so the AWS path never loads the Google Cloud SDK.
+        from google.cloud import bigquery
+
+        self.bigquery = bigquery
         self.location = location
         self.input_table = input_table
         self.output_table = output_table
@@ -191,8 +193,8 @@ class BigQueryWarehouse:
             ORDER BY user_id
             LIMIT @limit
         """
-        config = bigquery.QueryJobConfig(
-            query_parameters=[bigquery.ScalarQueryParameter("limit", "INT64", limit)]
+        config = self.bigquery.QueryJobConfig(
+            query_parameters=[self.bigquery.ScalarQueryParameter("limit", "INT64", limit)]
         )
         return [
             Applicant.model_validate(dict(row))
@@ -223,10 +225,10 @@ class BigQueryWarehouse:
 
     def list_runs(self, policy_version: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
         filters = "WHERE policy_version = @policy_version" if policy_version else ""
-        parameters = [bigquery.ScalarQueryParameter("limit", "INT64", limit)]
+        parameters = [self.bigquery.ScalarQueryParameter("limit", "INT64", limit)]
         if policy_version:
             parameters.append(
-                bigquery.ScalarQueryParameter("policy_version", "STRING", policy_version)
+                self.bigquery.ScalarQueryParameter("policy_version", "STRING", policy_version)
             )
         query = f"""
             SELECT * FROM `{self.runs_table}`
@@ -236,7 +238,7 @@ class BigQueryWarehouse:
         """
         rows = self.client.query(
             query,
-            job_config=bigquery.QueryJobConfig(query_parameters=parameters),
+            job_config=self.bigquery.QueryJobConfig(query_parameters=parameters),
             location=self.location,
         ).result()
         return [dict(row) for row in rows]
@@ -249,12 +251,12 @@ class BigQueryWarehouse:
         if policy_version:
             run_filters.append("policy_version = @policy_version")
             run_parameters.append(
-                bigquery.ScalarQueryParameter("policy_version", "STRING", policy_version)
+                self.bigquery.ScalarQueryParameter("policy_version", "STRING", policy_version)
             )
         if run_id:
             run_filters.append("run_id = @requested_run_id")
             run_parameters.append(
-                bigquery.ScalarQueryParameter("requested_run_id", "STRING", run_id)
+                self.bigquery.ScalarQueryParameter("requested_run_id", "STRING", run_id)
             )
         where = f"WHERE {' AND '.join(run_filters)}" if run_filters else ""
         latest_run_query = f"""
@@ -265,7 +267,7 @@ class BigQueryWarehouse:
         latest_rows = list(
             self.client.query(
                 latest_run_query,
-                job_config=bigquery.QueryJobConfig(query_parameters=run_parameters),
+                job_config=self.bigquery.QueryJobConfig(query_parameters=run_parameters),
                 location=self.location,
             ).result()
         )
@@ -273,8 +275,10 @@ class BigQueryWarehouse:
             return {"total": 0, "decisions": [], "nodes": [], "paths": [], "latest_run": None}
         latest_run = dict(latest_rows[0])
         selected_run_id = latest_run["run_id"]
-        config = bigquery.QueryJobConfig(
-            query_parameters=[bigquery.ScalarQueryParameter("run_id", "STRING", selected_run_id)]
+        config = self.bigquery.QueryJobConfig(
+            query_parameters=[
+                self.bigquery.ScalarQueryParameter("run_id", "STRING", selected_run_id)
+            ]
         )
         decision_query = f"""
             SELECT decision, COUNT(*) AS count

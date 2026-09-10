@@ -1,0 +1,32 @@
+# AWS runtime image: S3 + Athena + SageMaker.
+# Kept separate from the GCP Dockerfile so each image declares exactly one cloud
+# SDK. The shared body is short; a build ARG would hide which cloud an image is
+# for, and a wrong value ships the wrong SDK silently.
+FROM python:3.12-slim AS runtime
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PORT=8080
+
+WORKDIR /app
+
+COPY pyproject.toml README.md ./
+COPY src ./src
+COPY policies ./policies
+COPY web ./web
+COPY docker/serve /usr/local/bin/serve
+
+RUN pip install --no-cache-dir ".[aws]"
+
+RUN chmod +x /usr/local/bin/serve
+
+# This image runs as root, unlike the GCP one. SageMaker Serverless Inference
+# fails to provision a container that switches to a non-root user: the endpoint
+# reports only "Request to service failed" and never writes a container log.
+# Verified by bisection against this same image with the USER line removed and
+# nothing else changed, which reached InService.
+
+EXPOSE 8080
+
+# `serve` is the name SageMaker invokes; CMD covers hosts that pass no arguments.
+CMD ["serve"]

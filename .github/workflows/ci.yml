@@ -20,6 +20,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          persist-credentials: false
 
       - name: Install uv and Python
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
@@ -46,15 +48,25 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          persist-credentials: false
 
       - name: Install Terraform
         uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
 
       - name: Check Terraform formatting
-        run: terraform -chdir=infra fmt -check -recursive
+        run: |
+          terraform -chdir=infra fmt -check -recursive
+          terraform -chdir=infra/aws fmt -check -recursive
 
+      # -lockfile=readonly makes CI fail if a lock file is missing or stale
+      # rather than silently selecting a different provider release.
       - name: Initialize Terraform
-        run: terraform -chdir=infra init -backend=false
+        run: |
+          terraform -chdir=infra init -backend=false -lockfile=readonly
+          terraform -chdir=infra/aws init -backend=false -lockfile=readonly
 
       - name: Validate Terraform
-        run: terraform -chdir=infra validate
+        run: |
+          terraform -chdir=infra validate
+          terraform -chdir=infra/aws validate

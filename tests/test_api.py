@@ -137,3 +137,56 @@ def test_duplicate_policy_version_returns_conflict(tmp_path, monkeypatch) -> Non
         app.dependency_overrides.clear()
 
     assert response.status_code == 409
+
+
+def test_sagemaker_invocations_route_shares_the_predict_contract() -> None:
+    from pathlib import Path
+
+    policy = Path(__file__).parents[1] / "policies" / "credit_policy_v1.json"
+    warehouse = MemoryWarehouse()
+    policies = LocalPolicyRepository(policy)
+    app.dependency_overrides[get_scoring_service] = lambda: ScoringService(policies, warehouse)
+
+    try:
+        response = TestClient(app).post(
+            "/invocations",
+            json={"instances": [{}], "parameters": {"limit": 2}},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["predictions"][0]["processed_rows"] == 2
+
+
+def test_configured_endpoint_is_used_instead_of_the_in_process_engine() -> None:
+    from pathlib import Path
+
+    from credit_policy_studio.dependencies import get_remote_invoker
+    from credit_policy_studio.models import RunSummary
+
+    policy = Path(__file__).parents[1] / "policies" / "credit_policy_v1.json"
+    policies = LocalPolicyRepository(policy)
+    warehouse = MemoryWarehouse()
+    calls: list[PredictionParameters] = []
+
+    class StubInvoker:
+        def run(self, parameters: PredictionParameters) -> RunSummary:
+            calls.append(parameters)
+            summary = ScoringService(policies, warehouse).run(parameters)
+            return summary.model_copy(update={"policy_id": "from-endpoint"})
+
+    app.dependency_overrides[get_scoring_service] = lambda: ScoringService(policies, warehouse)
+    app.dependency_overrides[get_remote_invoker] = StubInvoker
+
+    try:
+        response = TestClient(app).post(
+            "/api/runs",
+            json={"instances": [{}], "parameters": {"limit": 4}},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["policy_id"] == "from-endpoint"
+    assert [parameters.limit for parameters in calls] == [4]

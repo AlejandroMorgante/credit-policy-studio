@@ -1,0 +1,15 @@
+region      = "us-east-1"
+name_prefix = "credit-policy-studio"
+
+# Buckets are global; leave empty to derive names from the account ID.
+# policy_bucket_name = "acme-credit-policy-policies"
+# data_bucket_name   = "acme-credit-policy-data"
+
+# Set after `make aws-image`, then flip deploy_endpoint to create the billable endpoint.
+# container_image        = "123456789012.dkr.ecr.us-east-1.amazonaws.com/credit-policy-studio:v1"
+deploy_endpoint = false
+
+# Empty = serverless inference (no idle cost, no quota request needed).
+# Set an instance type only for a provisioned endpoint, e.g. "ml.c6i.large".
+endpoint_instance_type = ""
+force_destroy          = false
