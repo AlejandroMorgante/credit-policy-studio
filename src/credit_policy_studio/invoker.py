@@ -1,20 +1,27 @@
 from __future__ import annotations
 
-from google.api_core.client_options import ClientOptions
-from google.cloud import aiplatform_v1
-from google.protobuf.json_format import MessageToDict, ParseDict
-from google.protobuf.struct_pb2 import Value
+from typing import Any, Protocol
 
 from .config import Settings
 from .models import PredictionParameters, RunSummary
+
+
+class RemoteInvoker(Protocol):
+    """A deployed scoring endpoint that turns parameters into one auditable run."""
+
+    def run(self, parameters: PredictionParameters) -> RunSummary: ...
 
 
 class VertexInvoker:
     def __init__(
         self,
         settings: Settings,
-        client: aiplatform_v1.PredictionServiceClient | None = None,
+        client: Any | None = None,
     ) -> None:
+        # Imported here so the AWS path never loads the Google Cloud SDK.
+        from google.api_core.client_options import ClientOptions
+        from google.cloud import aiplatform_v1
+
         self.settings = settings
         self.client = client or aiplatform_v1.PredictionServiceClient(
             client_options=ClientOptions(
@@ -23,6 +30,9 @@ class VertexInvoker:
         )
 
     def run(self, parameters: PredictionParameters) -> RunSummary:
+        from google.protobuf.json_format import MessageToDict, ParseDict
+        from google.protobuf.struct_pb2 import Value
+
         endpoint = self.settings.vertex_endpoint_id
         if not endpoint.startswith("projects/"):
             endpoint = self.client.endpoint_path(

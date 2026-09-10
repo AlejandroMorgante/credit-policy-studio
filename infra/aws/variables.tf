@@ -41,9 +41,25 @@ variable "deploy_endpoint" {
 }
 
 variable "endpoint_instance_type" {
-  description = "Instance type backing the SageMaker endpoint."
+  # Empty means serverless inference: no idle cost, and no per-instance endpoint
+  # quota to request first (that quota defaults to 0 on a new account).
+  # Set an instance type for a provisioned endpoint instead. T2 and T3 are not
+  # offered for hosting; ml.c6i.large is the cheapest current-generation x86.
+  description = "Instance type for a provisioned endpoint. Empty uses serverless inference."
   type        = string
-  default     = "ml.t2.medium"
+  default     = ""
+}
+
+variable "endpoint_serverless_memory_mb" {
+  description = "Memory for the serverless endpoint. Must be at least the container's footprint."
+  type        = number
+  default     = 2048
+}
+
+variable "endpoint_serverless_max_concurrency" {
+  description = "Concurrent invocations the serverless endpoint will serve."
+  type        = number
+  default     = 2
 }
 
 variable "force_destroy" {

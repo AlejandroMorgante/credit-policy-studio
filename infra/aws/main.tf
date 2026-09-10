@@ -418,9 +418,19 @@ resource "aws_sagemaker_endpoint_configuration" "scoring" {
   production_variants {
     variant_name           = "AllTraffic"
     model_name             = aws_sagemaker_model.scoring[0].name
-    initial_instance_count = 1
-    instance_type          = var.endpoint_instance_type
     initial_variant_weight = 1
+
+    # Provisioned only when an instance type is given; otherwise serverless.
+    initial_instance_count = var.endpoint_instance_type != "" ? 1 : null
+    instance_type          = var.endpoint_instance_type != "" ? var.endpoint_instance_type : null
+
+    dynamic "serverless_config" {
+      for_each = var.endpoint_instance_type == "" ? [1] : []
+      content {
+        memory_size_in_mb = var.endpoint_serverless_memory_mb
+        max_concurrency   = var.endpoint_serverless_max_concurrency
+      }
+    }
   }
 }
 

@@ -187,8 +187,8 @@ make aws-deploy-endpoint     # creates the billable SageMaker endpoint
 make aws-delete-endpoint     # tears it down again
 ```
 
-The SageMaker endpoint is the only always-on cost and is disabled by default
-(`deploy_endpoint=false`). Everything else is pay-per-use: Athena bills per byte scanned and S3 per
+The SageMaker endpoint is the only always-on cost (about USD 74 per month on `ml.c6i.large`) and is
+disabled by default (`deploy_endpoint=false`). Everything else is pay-per-use: Athena bills per byte scanned and S3 per
 stored object. Point the local UI at the endpoint with `CLOUD_PROVIDER=aws`, `POLICY_BUCKET`,
 `DATA_BUCKET`, and `SAGEMAKER_ENDPOINT_NAME` in `.env`.
 

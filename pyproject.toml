@@ -10,11 +10,10 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [{ name = "Credit Policy Studio contributors" }]
+# Cloud SDKs are extras, not base dependencies: an image built for one cloud
+# must not carry the other's SDK. Adapter imports are lazy to match.
 dependencies = [
   "fastapi>=0.116,<1",
-  "google-cloud-aiplatform>=1.111,<2",
-  "google-cloud-bigquery>=3.35,<4",
-  "google-cloud-storage>=3.3,<4",
   "pydantic>=2.11,<3",
   "pydantic-settings>=2.10,<3",
   "uvicorn[standard]>=0.35,<1",
@@ -24,8 +23,16 @@ dependencies = [
 aws = [
   "boto3>=1.35,<2",
 ]
+gcp = [
+  "google-cloud-aiplatform>=1.111,<2",
+  "google-cloud-bigquery>=3.35,<4",
+  "google-cloud-storage>=3.3,<4",
+]
 dev = [
   "boto3>=1.35,<2",
+  "google-cloud-aiplatform>=1.111,<2",
+  "google-cloud-bigquery>=3.35,<4",
+  "google-cloud-storage>=3.3,<4",
   "httpx>=0.28,<1",
   "moto[s3]>=5.1,<6",
   "pytest>=8.4,<9",

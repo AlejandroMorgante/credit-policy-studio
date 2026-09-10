@@ -14,7 +14,7 @@ AWS_IMAGE_TAG ?= dev
 AWS_TF_DIR := infra/aws
 AWS_REGION ?= us-east-1
 
-.PHONY: help setup fmt lint test run docker-build tf-init tf-plan infra-core image infra deploy-model seed upload-policy clean \
+.PHONY: help setup fmt lint test run docker-build docker-build-aws tf-init tf-plan infra-core image infra deploy-model seed upload-policy clean \
 	aws-tf-init aws-tf-plan aws-infra aws-image aws-deploy-endpoint aws-delete-endpoint aws-seed aws-upload-policy
 
 help: ## Show available commands.
@@ -44,8 +44,11 @@ test: ## Run unit and API tests.
 run: ## Run the complete local demo at http://localhost:8080.
 	LOCAL_POLICY_PATH=policies/credit_policy_v1.json $(VENV)/bin/uvicorn credit_policy_studio.api:app --reload --port 8080
 
-docker-build: ## Build the runtime container locally.
+docker-build: ## Build the GCP runtime container locally.
 	docker build -t credit-policy-studio:local .
+
+docker-build-aws: ## Build the AWS runtime container locally.
+	docker build -f Dockerfile.aws -t credit-policy-studio:local-aws .
 
 tf-init: ## Initialize Terraform.
 	terraform -chdir=$(TF_DIR) init
@@ -85,7 +88,7 @@ aws-infra: ## Create S3, Glue tables, Athena workgroup, ECR, and the runtime IAM
 aws-image: ## Build the runtime image and push it to ECR.
 	$(eval ECR := $(shell terraform -chdir=$(AWS_TF_DIR) output -raw ecr_repository_url))
 	aws ecr get-login-password --region $(AWS_REGION) | docker login --username AWS --password-stdin $(firstword $(subst /, ,$(ECR)))
-	docker build -t $(ECR):$(AWS_IMAGE_TAG) .
+	docker build -f Dockerfile.aws -t $(ECR):$(AWS_IMAGE_TAG) .
 	docker push $(ECR):$(AWS_IMAGE_TAG)
 	@echo "Pushed $(ECR):$(AWS_IMAGE_TAG)"
 

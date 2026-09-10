@@ -3,9 +3,7 @@ from __future__ import annotations
 import json
 from hashlib import sha256
 from pathlib import Path
-from typing import Protocol
-
-from google.cloud import storage
+from typing import Any, Protocol
 
 from .models import CreditPolicy
 
@@ -138,11 +136,16 @@ class GcsPolicyRepository:
         project_id: str,
         bucket_name: str,
         active_object: str,
-        client: storage.Client | None = None,
+        client: Any | None = None,
     ) -> None:
         self.bucket_name = bucket_name
         self.active_object = active_object
-        self.client = client or storage.Client(project=project_id)
+        if client is None:
+            # Imported here so the AWS path never loads the Google Cloud SDK.
+            from google.cloud import storage
+
+            client = storage.Client(project=project_id)
+        self.client = client
 
     def get_active(self) -> CreditPolicy:
         bucket = self.client.bucket(self.bucket_name)

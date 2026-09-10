@@ -7,6 +7,9 @@ name_prefix = "credit-policy-studio"
 
 # Set after `make aws-image`, then flip deploy_endpoint to create the billable endpoint.
 # container_image        = "123456789012.dkr.ecr.us-east-1.amazonaws.com/credit-policy-studio:v1"
-deploy_endpoint        = false
-endpoint_instance_type = "ml.t2.medium"
+deploy_endpoint = false
+
+# Empty = serverless inference (no idle cost, no quota request needed).
+# Set an instance type only for a provisioned endpoint, e.g. "ml.c6i.large".
+endpoint_instance_type = ""
 force_destroy          = false

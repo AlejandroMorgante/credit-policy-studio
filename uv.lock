@@ -463,9 +463,6 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
-    { name = "google-cloud-aiplatform" },
-    { name = "google-cloud-bigquery" },
-    { name = "google-cloud-storage" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "uvicorn", extra = ["standard"] },
@@ -477,11 +474,19 @@ aws = [
 ]
 dev = [
     { name = "boto3" },
+    { name = "google-cloud-aiplatform" },
+    { name = "google-cloud-bigquery" },
+    { name = "google-cloud-storage" },
     { name = "httpx" },
     { name = "moto", extra = ["s3"] },
     { name = "pytest" },
     { name = "pytest-cov" },
     { name = "ruff" },
+]
+gcp = [
+    { name = "google-cloud-aiplatform" },
+    { name = "google-cloud-bigquery" },
+    { name = "google-cloud-storage" },
 ]
 
 [package.metadata]
@@ -489,9 +494,12 @@ requires-dist = [
     { name = "boto3", marker = "extra == 'aws'", specifier = ">=1.35,<2" },
     { name = "boto3", marker = "extra == 'dev'", specifier = ">=1.35,<2" },
     { name = "fastapi", specifier = ">=0.116,<1" },
-    { name = "google-cloud-aiplatform", specifier = ">=1.111,<2" },
-    { name = "google-cloud-bigquery", specifier = ">=3.35,<4" },
-    { name = "google-cloud-storage", specifier = ">=3.3,<4" },
+    { name = "google-cloud-aiplatform", marker = "extra == 'dev'", specifier = ">=1.111,<2" },
+    { name = "google-cloud-aiplatform", marker = "extra == 'gcp'", specifier = ">=1.111,<2" },
+    { name = "google-cloud-bigquery", marker = "extra == 'dev'", specifier = ">=3.35,<4" },
+    { name = "google-cloud-bigquery", marker = "extra == 'gcp'", specifier = ">=3.35,<4" },
+    { name = "google-cloud-storage", marker = "extra == 'dev'", specifier = ">=3.3,<4" },
+    { name = "google-cloud-storage", marker = "extra == 'gcp'", specifier = ">=3.3,<4" },
     { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.28,<1" },
     { name = "moto", extras = ["s3"], marker = "extra == 'dev'", specifier = ">=5.1,<6" },
     { name = "pydantic", specifier = ">=2.11,<3" },
@@ -501,7 +509,7 @@ requires-dist = [
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.12,<1" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.35,<1" },
 ]
-provides-extras = ["aws", "dev"]
+provides-extras = ["aws", "gcp", "dev"]
 
 [[package]]
 name = "cryptography"

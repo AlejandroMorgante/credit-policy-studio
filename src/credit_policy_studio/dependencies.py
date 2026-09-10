@@ -1,6 +1,7 @@
 from functools import lru_cache
 
 from .config import get_settings
+from .invoker import RemoteInvoker
 from .repositories import GcsPolicyRepository, LocalPolicyRepository, PolicyRepository
 from .service import ScoringService
 from .warehouse import BigQueryWarehouse, MemoryWarehouse, Warehouse
@@ -63,7 +64,7 @@ def get_warehouse() -> Warehouse:
     )
 
 
-def get_remote_invoker():
+def get_remote_invoker() -> RemoteInvoker | None:
     """Returns the endpoint invoker for the active provider, or None to run in-process."""
     settings = get_settings()
     if settings.provider == "aws" and settings.sagemaker_endpoint_name:

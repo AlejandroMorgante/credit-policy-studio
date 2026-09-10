@@ -14,6 +14,7 @@ from .dependencies import (
     get_scoring_service,
     get_warehouse,
 )
+from .invoker import RemoteInvoker
 from .models import CreditPolicy, PublishPolicyRequest, RunSummary, VertexPredictionRequest
 from .repositories import PolicyRepository
 from .service import ScoringService
@@ -28,6 +29,7 @@ app = FastAPI(
 ScoringServiceDep = Annotated[ScoringService, Depends(get_scoring_service)]
 PolicyRepositoryDep = Annotated[PolicyRepository, Depends(get_policy_repository)]
 WarehouseDep = Annotated[Warehouse, Depends(get_warehouse)]
+RemoteInvokerDep = Annotated[RemoteInvoker | None, Depends(get_remote_invoker)]
 
 WEB_DIR = Path(__file__).resolve().parents[2] / "web"
 if WEB_DIR.exists():
@@ -62,10 +64,10 @@ def predict(
 def create_run(
     request: VertexPredictionRequest,
     service: ScoringServiceDep,
+    invoker: RemoteInvokerDep,
 ) -> RunSummary:
     # The localhost POC becomes a thin authenticated facade when an endpoint is configured.
     # With no endpoint it falls back to the in-memory demo for contributors and CI.
-    invoker = get_remote_invoker()
     if invoker is not None:
         return invoker.run(request.parameters)
     return service.run(request.parameters)

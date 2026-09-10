@@ -196,8 +196,11 @@ A separate Terraform root, so the GCP root stays untouched:
   only when `deploy_endpoint = true`, mirroring how the GCP root defers the billable Vertex replica
   to `make deploy-model`.
 
-`aws_sagemaker_endpoint` is the only always-on cost (roughly USD 35-60 per month on a small
-instance). It is behind a variable and has a teardown target so a POC can be parked.
+`aws_sagemaker_endpoint` is the only always-on cost: about USD 74 per month for `ml.c6i.large`, the
+cheapest current-generation x86 hosting instance in `us-east-1`. T2 and T3 are not offered for
+SageMaker hosting at all. Graviton (`ml.c8g.medium`, about USD 35 per month) would be cheaper but
+needs an arm64 image. The endpoint is behind a variable and has a teardown target so a POC can be
+parked.
 
 ## 6. Makefile targets
 
@@ -215,15 +218,27 @@ prefix; the fixture rows already exist as `DEMO_APPLICANTS` in `warehouse.py`.
 
 ## 7. Dependencies
 
-`boto3` is an optional extra rather than a base dependency:
+Neither cloud SDK is a base dependency. Both are extras, so an image built for one cloud does not
+carry the other's SDK:
 
 ```toml
+dependencies = ["fastapi", "pydantic", "pydantic-settings", "uvicorn[standard]"]
+
 [project.optional-dependencies]
 aws = ["boto3>=1.35,<2"]
+gcp = ["google-cloud-aiplatform", "google-cloud-bigquery", "google-cloud-storage"]
 ```
 
-A single image installs `.[aws]` and serves both clouds; `aws.py` imports `boto3` and is itself
-imported lazily from `dependencies.py`, so a GCP-only install never needs the AWS SDK.
+The Dockerfile takes `ARG EXTRAS=gcp`, which keeps `gcloud builds submit --tag` working unchanged;
+`make aws-image` passes `--build-arg EXTRAS=aws`. Every cloud adapter imports its SDK lazily —
+`aws.py` inside its own module, and `GcsPolicyRepository`, `BigQueryWarehouse` and `VertexInvoker`
+inside their constructors — so importing `api.py` pulls in neither.
+
+This is not only about image size. With the GCP SDK loaded at module scope, container start took
+**15.19 s**; with lazy imports it takes **0.85 s**. On SageMaker Serverless, where a cold start gets
+constrained CPU, the slow path exceeded the provisioning window and every endpoint creation failed
+with a generic `Request to service failed` and no container logs at all. The AWS image is also
+195 MB instead of 438 MB.
 
 ## 8. Tests
 
