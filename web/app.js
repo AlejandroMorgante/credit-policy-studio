@@ -1,3 +1,6 @@
+import { setupEditorControls } from "./editor-controls.mjs";
+import { positionedLayout, draggedPosition, fitViewport, NODE_WIDTH, NODE_HEIGHT } from "./tree-layout.mjs";
+
 const state = {
   policy: null,
   selected: null,
@@ -11,6 +14,17 @@ const state = {
   editorSelected: null,
   pendingPromotionVersion: null,
   dashboardRequest: 0,
+  layout: null,
+  minimap: null,
+  focusMode: false,
+  inspectorBeforeFocus: true,
+  positionKey: null,
+  nodePositions: {},
+  nodeDrag: null,
+  lastMove: null,
+  saving: false,
+  loadingPolicy: false,
+  editorDirty: false,
 };
 const viewportState = {
   x: 0,
@@ -21,12 +35,12 @@ const viewportState = {
   lastPoint: null,
   pinchDistance: null,
   dragged: false,
+  viewportWidth: 0,
+  viewportHeight: 0,
 };
-const MIN_ZOOM = 0.55;
-const MAX_ZOOM = 1.5;
-const NODE_WIDTH = 188;
-const NODE_HEIGHT = 80;
-const LEVEL_GAP = 136;
+let editorControls;
+const MIN_ZOOM = 0.05;
+const MAX_ZOOM = 2;
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
 
@@ -38,6 +52,208 @@ const fieldLabels = {
   variable_2: "Deuda mensual",
   variable_3: "Antigüedad laboral (meses)",
 };
+
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, (char) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+  })[char]);
+}
+
+function nodeTypeLabel(node) {
+  return node.type === "condition" ? "Condición" : {
+    APPROVED: "Aprobación", REVIEW: "Revisión", REJECTED: "Rechazo",
+  }[node.decision];
+}
+
+function setInspectorVisible(visible) {
+  $(".workspace-grid").classList.toggle("inspector-hidden", !visible);
+  $("#inspector").hidden = !visible;
+  const button = $("#toggle-inspector");
+  button.setAttribute("aria-expanded", String(visible));
+  button.setAttribute("aria-label", `${visible ? "Ocultar" : "Mostrar"} panel de detalles`);
+  button.title = button.getAttribute("aria-label");
+  if (state.policy) syncEditorLock();
+}
+
+$("#toggle-inspector").addEventListener("click", () => {
+  setInspectorVisible($("#inspector").hidden);
+});
+
+function setFocusMode(enabled) {
+  if (enabled === state.focusMode) return;
+  if (enabled) state.inspectorBeforeFocus = !$("#inspector").hidden;
+  state.focusMode = enabled;
+  document.body.classList.toggle("focus-mode", enabled);
+  setInspectorVisible(enabled ? false : state.inspectorBeforeFocus);
+  const button = $("#focus-mode-button");
+  button.setAttribute("aria-pressed", String(enabled));
+  button.setAttribute("aria-label", enabled ? "Salir del modo enfoque" : "Activar modo enfoque");
+  button.title = enabled ? "Salir del modo enfoque (Escape)" : "Modo enfoque · ampliar árbol";
+  button.querySelector("path").setAttribute("d", enabled
+    ? "M3 9h6V3m0 6L3 3m18 12h-6v6m0-6 6 6"
+    : "M8 3H3v5m0-5 6 6m7 12h5v-5m0 5-6-6");
+  $("#focus-version-context").hidden = !enabled;
+  syncVersionUi();
+  // Keep the selected node visible when a sidebar changes the available width.
+  requestAnimationFrame(() => {
+    if (enabled) focusNode();
+    button.focus({ preventScroll: true });
+  });
+}
+
+$("#focus-mode-button").addEventListener("click", () => setFocusMode(!state.focusMode));
+
+function loadNodePositions() {
+  const key = `credit-policy-layout:${state.policy.metadata.policy_id}:${state.policy.metadata.version}`;
+  if (key === state.positionKey) return;
+  state.positionKey = key;
+  state.nodePositions = {};
+  state.lastMove = null;
+  try {
+    const saved = JSON.parse(window.localStorage.getItem(key) || "{}");
+    Object.entries(saved).forEach(([id, position]) => {
+      if (state.policy.nodes[id] && Number.isFinite(position?.x) && Number.isFinite(position?.y)) {
+        state.nodePositions[id] = { x: position.x, y: position.y };
+      }
+    });
+  } catch { /* A missing or obsolete layout falls back to the automatic layout. */ }
+}
+
+function storeNodePositions() {
+  try { window.localStorage.setItem(state.positionKey, JSON.stringify(state.nodePositions)); }
+  catch { toast("La distribución se mantiene en esta sesión; el navegador no pudo guardarla.", true); }
+}
+
+$("#auto-layout").addEventListener("click", () => {
+  if (!Object.keys(state.nodePositions).length) { fitTree(); return; }
+  state.lastMove = structuredClone(state.nodePositions);
+  state.nodePositions = {};
+  storeNodePositions();
+  renderTree();
+  fitTree();
+  toast("Distribución automática aplicada");
+});
+$("#undo-layout").addEventListener("click", () => {
+  if (!state.lastMove) return;
+  state.nodePositions = state.lastMove;
+  state.lastMove = null;
+  storeNodePositions();
+  renderTree();
+  toast("Distribución anterior restaurada");
+});
+
+function renderMinimap() {
+  if (!state.layout) return;
+  const { width, height, x, y, minX, minY } = state.layout;
+  const scale = Math.min(164 / width, 88 / height);
+  const offsetX = (180 - width * scale) / 2 - minX * scale;
+  const offsetY = (104 - height * scale) / 2 - minY * scale;
+  state.minimap = { scale, offsetX, offsetY };
+  const group = $("#minimap-content");
+  group.setAttribute("transform", `translate(${offsetX} ${offsetY}) scale(${scale})`);
+  group.innerHTML = Object.values(state.policy.nodes).map((node) => {
+    const links = node.type === "condition" ? [node.true_node, node.false_node].map((child) =>
+      `<path d="M${x[node.id] + NODE_WIDTH / 2},${y[node.id] + NODE_HEIGHT} L${x[child] + NODE_WIDTH / 2},${y[child]}"/>`
+    ).join("") : "";
+    return `${links}<rect x="${x[node.id]}" y="${y[node.id]}" width="${NODE_WIDTH}" height="${NODE_HEIGHT}" rx="12" class="mini-node${node.id === state.selected ? " selected" : ""}"/>`;
+  }).join("");
+  updateMinimapWindow();
+}
+
+function updateMinimapWindow() {
+  if (!state.minimap) return;
+  const { scale, offsetX, offsetY } = state.minimap;
+  const viewport = $("#tree-viewport");
+  const rect = $("#minimap-window");
+  rect.setAttribute("x", offsetX - viewportState.x / viewportState.scale * scale);
+  rect.setAttribute("y", offsetY - viewportState.y / viewportState.scale * scale);
+  rect.setAttribute("width", viewport.clientWidth / viewportState.scale * scale);
+  rect.setAttribute("height", viewport.clientHeight / viewportState.scale * scale);
+}
+
+$("#minimap").addEventListener("click", (event) => {
+  if (!state.minimap) return;
+  if (event.detail === 0) { fitTree(); return; }
+  const svg = $("#minimap-svg");
+  const matrix = svg.getScreenCTM();
+  if (!matrix) return;
+  const point = new DOMPoint(event.clientX, event.clientY).matrixTransform(matrix.inverse());
+  const { scale, offsetX, offsetY } = state.minimap;
+  const viewport = $("#tree-viewport");
+  viewportState.x = viewport.clientWidth / 2 - (point.x - offsetX) / scale * viewportState.scale;
+  viewportState.y = viewport.clientHeight / 2 - (point.y - offsetY) / scale * viewportState.scale;
+  applyViewportTransform();
+});
+
+function renderNodeSearch() {
+  if (!state.policy) return;
+  const normalize = (value) => String(value).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  const query = normalize($("#node-search").value.trim());
+  const matches = Object.values(state.policy.nodes).filter((node) => {
+    const fields = (node.validations || [node]).map((rule) => fieldLabels[rule.field] || "");
+    return normalize([node.label, node.id, nodeTypeLabel(node), ...fields].join(" ")).includes(query);
+  });
+  $("#node-search-count").textContent = matches.length
+    ? `${matches.length} ${matches.length === 1 ? "nodo encontrado" : "nodos encontrados"}`
+    : "No encontramos nodos. Probá con otro nombre o variable.";
+  $("#node-search-results").replaceChildren(...matches.map((node) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "node-search-result";
+    button.innerHTML = `<span class="search-node-icon" aria-hidden="true">${node.type === "condition" ? "◇" : "○"}</span><span><strong>${escapeHtml(node.label)}</strong><small>${nodeTypeLabel(node)} · Nivel ${state.layout.depth[node.id] + 1}</small></span><span class="search-arrow" aria-hidden="true">↗</span>`;
+    button.addEventListener("click", async () => {
+      $("#node-search-dialog").close();
+      if (!await requestNodeSelection(node.id)) return;
+      requestAnimationFrame(() => {
+        focusNode(node.id);
+        $$(".tree-node").find((element) => element.dataset.nodeId === node.id)?.focus({ preventScroll: true });
+      });
+    });
+    return button;
+  }));
+}
+
+function openNodeSearch() {
+  if (!state.layout || state.loadingPolicy) return;
+  $("#node-search").value = "";
+  renderNodeSearch();
+  $("#node-search-dialog").showModal();
+  $("#node-search").focus();
+}
+
+$("#find-node-button").addEventListener("click", openNodeSearch);
+$("#node-search-close").addEventListener("click", () => $("#node-search-dialog").close());
+$("#node-search").addEventListener("input", renderNodeSearch);
+$("#node-search").addEventListener("keydown", (event) => {
+  if (event.key === "ArrowDown" || event.key === "Enter") {
+    event.preventDefault();
+    const first = $(".node-search-result");
+    if (event.key === "Enter") first?.click();
+    else first?.focus();
+  }
+});
+$("#node-search-results").addEventListener("keydown", (event) => {
+  if (!["ArrowDown", "ArrowUp"].includes(event.key)) return;
+  event.preventDefault();
+  const next = event.key === "ArrowDown" ? event.target.nextElementSibling : event.target.previousElementSibling;
+  (next || $("#node-search")).focus();
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && state.nodeDrag) {
+    event.preventDefault();
+    finishNodeDrag(true);
+    return;
+  }
+  if (state.saving || state.loadingPolicy) return;
+  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k" && !$("dialog[open]")) {
+    event.preventDefault();
+    openNodeSearch();
+  }
+  if (event.key === "Escape" && state.focusMode && !$("dialog[open]")) {
+    event.preventDefault();
+    setFocusMode(false);
+  }
+});
 
 function toast(message, error = false) {
   const element = $("#toast");
@@ -55,66 +271,48 @@ async function api(path, options = {}) {
   return response.json();
 }
 
-function hierarchy(policy) {
-  const children = (id) => {
-    const node = policy.nodes[id];
-    return node.type === "condition" ? [node.true_node, node.false_node] : [];
-  };
-  const depth = {};
-  const visitDepth = (id, level) => {
-    depth[id] = Math.max(depth[id] ?? 0, level);
-    children(id).forEach((child) => visitDepth(child, level + 1));
-  };
-  visitDepth(policy.root_node, 0);
-  let leafIndex = 0;
-  const x = {};
-  const assignX = (id) => {
-    const kids = children(id);
-    if (!kids.length) return (x[id] = 36 + leafIndex++ * 200);
-    const values = kids.map(assignX);
-    return (x[id] = values.reduce((a, b) => a + b, 0) / values.length);
-  };
-  assignX(policy.root_node);
-  return { x, depth, children, width: Math.max(1080, leafIndex * 200 + 72) };
-}
-
 function clampZoom(scale) {
-  return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, scale));
+  const viewport = $("#tree-viewport");
+  const fittedScale = state.layout ? fitViewport(
+    state.layout.width, state.layout.height, viewport.clientWidth, viewport.clientHeight,
+  ).scale : MIN_ZOOM;
+  return Math.min(MAX_ZOOM, Math.max(Math.min(MIN_ZOOM, fittedScale), scale));
 }
 
 function applyViewportTransform() {
   $("#tree-stage").style.transform = `translate3d(${viewportState.x}px, ${viewportState.y}px, 0) scale(${viewportState.scale})`;
   $("#zoom-level").textContent = `${Math.round(viewportState.scale * 100)}%`;
+  updateMinimapWindow();
   $$(".link-label-group").forEach((group) => {
     const x = Number(group.dataset.anchorX);
     const y = Number(group.dataset.anchorY);
-    const inverseScale = 1 / viewportState.scale;
+    const inverseScale = Math.min(1.5, 1 / viewportState.scale);
     group.setAttribute("transform", `translate(${x} ${y}) scale(${inverseScale}) translate(${-x} ${-y})`);
   });
 }
 
 function fitTree() {
   const viewport = $("#tree-viewport");
-  const stage = $("#tree-stage");
-  const stageWidth = Number.parseFloat(stage.style.width);
-  const stageHeight = Number.parseFloat(stage.style.height);
-  if (!viewport.clientWidth || !stageWidth || !stageHeight) return;
-  viewportState.scale = clampZoom(Math.min(1, (viewport.clientWidth - 52) / stageWidth, (viewport.clientHeight - 72) / stageHeight));
-  viewportState.x = (viewport.clientWidth - stageWidth * viewportState.scale) / 2;
-  viewportState.y = Math.max(26, (viewport.clientHeight - stageHeight * viewportState.scale) / 2 - 12);
+  if (!state.layout || !viewport.clientWidth || !viewport.clientHeight) return;
+  Object.assign(viewportState, fitViewport(
+    state.layout.width, state.layout.height, viewport.clientWidth, viewport.clientHeight,
+  ));
+  viewportState.x -= state.layout.minX * viewportState.scale;
+  viewportState.y -= state.layout.minY * viewportState.scale;
+  viewportState.viewportWidth = viewport.clientWidth;
+  viewportState.viewportHeight = viewport.clientHeight;
   viewportState.initialized = true;
   applyViewportTransform();
 }
 
-function focusTree() {
-  fitTree();
-  if (viewportState.scale >= 0.72) return;
+function focusNode(id = state.selected) {
+  if (!state.layout || !state.policy.nodes[id]) return;
   const viewport = $("#tree-viewport");
-  const stage = $("#tree-stage");
-  const stageWidth = Number.parseFloat(stage.style.width);
-  viewportState.scale = 0.72;
-  viewportState.x = (viewport.clientWidth - stageWidth * viewportState.scale) / 2;
-  viewportState.y = 30;
+  viewportState.scale = 1;
+  viewportState.x = viewport.clientWidth / 2 - state.layout.x[id] - NODE_WIDTH / 2;
+  viewportState.y = viewport.clientHeight / 2 - state.layout.y[id] - NODE_HEIGHT / 2;
+  viewportState.viewportWidth = viewport.clientWidth;
+  viewportState.viewportHeight = viewport.clientHeight;
   applyViewportTransform();
 }
 
@@ -139,34 +337,52 @@ function zoomFromCenter(factor) {
 
 function renderTree() {
   if (!state.policy) return;
-  const { x, depth, children, width } = hierarchy(state.policy);
+  loadNodePositions();
+  state.layout = positionedLayout(state.policy, state.nodePositions);
+  const { x, y, width, height, minX, minY } = state.layout;
+  $("#tree-size").textContent = `${Object.keys(state.policy.nodes).length} nodos`;
+  $("#undo-layout").hidden = !state.lastMove;
   const nodeCounts = Object.fromEntries((state.dashboard?.nodes || []).map((n) => [n.node_id, n.count]));
   const pathCounts = new Map((state.dashboard?.paths || []).map((p) => [`${p.source}:${p.target}`, Number(p.count)]));
   const maxPathCount = Math.max(1, ...pathCounts.values());
-  const height = (Math.max(...Object.values(depth)) + 1) * LEVEL_GAP + 48;
   const stage = $("#tree-stage");
   stage.style.width = `${width}px`; stage.style.height = `${height}px`;
   const nodes = $("#tree-nodes"); nodes.innerHTML = "";
-  const svg = $("#tree-links"); svg.setAttribute("viewBox", `0 0 ${width} ${height}`); svg.innerHTML = "";
+  const svg = $("#tree-links");
+  svg.setAttribute("viewBox", `${minX} ${minY} ${width} ${height}`);
+  svg.style.left = `${minX}px`; svg.style.top = `${minY}px`;
+  svg.innerHTML = "";
 
   Object.values(state.policy.nodes).forEach((node) => {
     const button = document.createElement("button");
     const decisionClass = node.type === "decision" ? ` decision ${node.decision}` : "";
     button.className = `tree-node${decisionClass}${state.selected === node.id ? " selected" : ""}`;
-    button.style.left = `${x[node.id]}px`; button.style.top = `${24 + depth[node.id] * LEVEL_GAP}px`;
+    button.style.left = `${x[node.id]}px`; button.style.top = `${y[node.id]}px`;
     const count = state.mode === "impact" ? `<span class="impact-badge">${nodeCounts[node.id] || 0}</span>` : "";
-    button.innerHTML = `<span class="type"><span>${node.type === "condition" ? "Condición" : node.decision}</span>${count}</span><strong>${node.label}</strong>`;
-    button.addEventListener("click", () => {
+    button.type = "button";
+    button.dataset.nodeId = node.id;
+    button.setAttribute("aria-pressed", String(state.selected === node.id));
+    button.title = node.label;
+    button.innerHTML = `<span class="type"><span>${nodeTypeLabel(node)}</span>${count}</span><strong>${escapeHtml(node.label)}</strong>`;
+    button.addEventListener("click", async () => {
       if (viewportState.dragged) return;
-      selectNode(node.id);
-    }); nodes.appendChild(button);
+      if (!await requestNodeSelection(node.id)) return;
+      if (viewportState.scale < 0.65) focusNode(node.id);
+    });
+    button.addEventListener("focus", () => {
+      if (button.matches(":focus-visible")) focusNode(node.id);
+    });
+    nodes.appendChild(button);
 
-    children(node.id).forEach((child, index) => {
-      const startX = x[node.id] + NODE_WIDTH / 2, startY = 24 + depth[node.id] * LEVEL_GAP + NODE_HEIGHT;
-      const endX = x[child] + NODE_WIDTH / 2, endY = 24 + depth[child] * LEVEL_GAP;
+    const branches = node.type === "condition" ? [node.true_node, node.false_node] : [];
+    branches.forEach((child, index) => {
+      const startX = x[node.id] + NODE_WIDTH / 2, startY = y[node.id] + NODE_HEIGHT;
+      const endX = x[child] + NODE_WIDTH / 2, endY = y[child];
       const middle = startY + (endY - startY) / 2;
       const ns = "http://www.w3.org/2000/svg";
       const path = document.createElementNS(ns, "path");
+      path.dataset.source = node.id;
+      path.dataset.target = child;
       path.setAttribute("d", `M ${startX} ${startY} C ${startX} ${middle}, ${endX} ${middle}, ${endX} ${endY}`);
       const flowCount = pathCounts.get(`${node.id}:${child}`) || 0;
       const hasImpact = state.mode === "impact" && flowCount > 0;
@@ -206,18 +422,92 @@ function renderTree() {
       svg.appendChild(labelGroup);
     });
   });
+  renderMinimap();
   if (!viewportState.initialized) requestAnimationFrame(fitTree);
+  else applyViewportTransform();
+}
+
+function paintNodeDrag() {
+  const drag = state.nodeDrag;
+  if (!drag?.active) return;
+  const position = draggedPosition(drag.start, drag.dx, drag.dy, drag.scale);
+  state.layout.x[drag.id] = position.x;
+  state.layout.y[drag.id] = position.y;
+  drag.element.style.left = `${position.x}px`;
+  drag.element.style.top = `${position.y}px`;
+  $$("#tree-links .tree-link").forEach((path) => {
+    const { source, target } = path.dataset;
+    const startX = state.layout.x[source] + NODE_WIDTH / 2;
+    const startY = state.layout.y[source] + NODE_HEIGHT;
+    const endX = state.layout.x[target] + NODE_WIDTH / 2;
+    const endY = state.layout.y[target];
+    const middle = startY + (endY - startY) / 2;
+    path.setAttribute("d", `M ${startX} ${startY} C ${startX} ${middle}, ${endX} ${middle}, ${endX} ${endY}`);
+    const group = path.nextElementSibling;
+    const nextX = state.mode === "impact" ? (startX + endX) / 2 : startX + (endX - startX) * 0.2;
+    const nextY = state.mode === "impact" ? middle : startY + 24;
+    const dx = nextX - Number(group.dataset.anchorX);
+    const dy = nextY - Number(group.dataset.anchorY);
+    group.querySelectorAll("text").forEach((label) => {
+      label.setAttribute("x", Number(label.getAttribute("x")) + dx);
+      label.setAttribute("y", Number(label.getAttribute("y")) + dy);
+    });
+    group.dataset.anchorX = nextX;
+    group.dataset.anchorY = nextY;
+  });
+  renderMinimap();
+  applyViewportTransform();
+  drag.frame = null;
+}
+
+async function finishNodeDrag(cancelled = false) {
+  const drag = state.nodeDrag;
+  if (!drag) return;
+  if (drag.frame) cancelAnimationFrame(drag.frame);
+  if (drag.active && !cancelled) {
+    paintNodeDrag();
+    state.lastMove = structuredClone(state.nodePositions);
+    state.nodePositions[drag.id] = {
+      x: Math.round(state.layout.x[drag.id]), y: Math.round(state.layout.y[drag.id]),
+    };
+    storeNodePositions();
+  }
+  state.nodeDrag = null;
+  $("#tree-viewport").classList.remove("moving-node");
+  if (drag.active) renderTree();
+  viewportState.dragged = true;
+  window.setTimeout(() => { viewportState.dragged = false; }, 0);
+  if (!cancelled && await requestNodeSelection(drag.id)) {
+    if (!drag.active && viewportState.scale < 0.65) focusNode(drag.id);
+  }
 }
 
 function setupViewportInteractions() {
   const viewport = $("#tree-viewport");
   viewport.addEventListener("wheel", (event) => {
+    if (state.nodeDrag) { event.preventDefault(); return; }
+    if (event.target.closest(".minimap, .canvas-controls")) return;
     event.preventDefault();
     zoomAt(event.clientX, event.clientY, viewportState.scale * Math.exp(-event.deltaY * 0.0015));
   }, { passive: false });
 
   viewport.addEventListener("pointerdown", (event) => {
-    if (event.button !== 0 || event.target.closest(".canvas-controls") || event.target.closest(".tree-node")) return;
+    if (state.saving || state.loadingPolicy) return;
+    if (event.button !== 0 || event.target.closest(".canvas-controls, .minimap")) return;
+    const node = event.target.closest(".tree-node");
+    if (node) {
+      if (state.nodeDrag || viewportState.pointers.size) return;
+      event.preventDefault();
+      const id = node.dataset.nodeId;
+      state.nodeDrag = {
+        id, element: node, pointerId: event.pointerId, active: false,
+        clientX: event.clientX, clientY: event.clientY, dx: 0, dy: 0,
+        start: { x: state.layout.x[id], y: state.layout.y[id] }, scale: viewportState.scale,
+      };
+      viewport.setPointerCapture(event.pointerId);
+      return;
+    }
+    if (state.nodeDrag) return;
     viewport.setPointerCapture(event.pointerId);
     viewportState.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
     viewportState.lastPoint = { x: event.clientX, y: event.clientY };
@@ -226,6 +516,17 @@ function setupViewportInteractions() {
   });
 
   viewport.addEventListener("pointermove", (event) => {
+    const drag = state.nodeDrag;
+    if (drag?.pointerId === event.pointerId) {
+      drag.dx = event.clientX - drag.clientX;
+      drag.dy = event.clientY - drag.clientY;
+      if (!drag.active && Math.hypot(drag.dx, drag.dy) < 5) return;
+      drag.active = true;
+      drag.element.classList.add("moving");
+      viewport.classList.add("moving-node");
+      if (!drag.frame) drag.frame = requestAnimationFrame(paintNodeDrag);
+      return;
+    }
     if (!viewportState.pointers.has(event.pointerId)) return;
     viewportState.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
     const points = [...viewportState.pointers.values()];
@@ -247,6 +548,10 @@ function setupViewportInteractions() {
   });
 
   const releasePointer = (event) => {
+    if (state.nodeDrag?.pointerId === event.pointerId) {
+      finishNodeDrag(event.type === "pointercancel" || event.type === "lostpointercapture");
+      return;
+    }
     viewportState.pointers.delete(event.pointerId);
     viewportState.pinchDistance = null;
     viewportState.lastPoint = viewportState.pointers.size === 1 ? [...viewportState.pointers.values()][0] : null;
@@ -257,19 +562,53 @@ function setupViewportInteractions() {
   };
   viewport.addEventListener("pointerup", releasePointer);
   viewport.addEventListener("pointercancel", releasePointer);
+  viewport.addEventListener("lostpointercapture", releasePointer);
   viewport.addEventListener("dblclick", (event) => {
-    if (!event.target.closest(".tree-node")) fitTree();
+    if (!event.target.closest("button")) fitTree();
   });
   viewport.addEventListener("keydown", (event) => {
+    if (event.target.closest(".canvas-controls, .minimap")) return;
     if (event.key === "+" || event.key === "=") zoomFromCenter(1.15);
     else if (event.key === "-") zoomFromCenter(1 / 1.15);
     else if (event.key === "0") fitTree();
-    else return;
+    else if (event.key.toLowerCase() === "f") focusNode();
+    else if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)) {
+      const step = event.shiftKey ? 160 : 60;
+      viewportState.x += event.key === "ArrowLeft" ? step : event.key === "ArrowRight" ? -step : 0;
+      viewportState.y += event.key === "ArrowUp" ? step : event.key === "ArrowDown" ? -step : 0;
+      applyViewportTransform();
+    } else return;
     event.preventDefault();
   });
   $("#zoom-in").addEventListener("click", () => zoomFromCenter(1.18));
   $("#zoom-out").addEventListener("click", () => zoomFromCenter(1 / 1.18));
-  $("#zoom-reset").addEventListener("click", fitTree);
+  $("#zoom-reset").addEventListener("click", () => zoomFromCenter(1 / viewportState.scale));
+  $("#fit-tree").addEventListener("click", fitTree);
+  $("#focus-node").addEventListener("click", () => focusNode());
+  $("#locate-node").addEventListener("click", () => focusNode());
+  viewportState.viewportWidth = viewport.clientWidth;
+  viewportState.viewportHeight = viewport.clientHeight;
+  new ResizeObserver(() => {
+    if (viewportState.initialized) {
+      viewportState.x += (viewport.clientWidth - viewportState.viewportWidth) / 2;
+      viewportState.y += (viewport.clientHeight - viewportState.viewportHeight) / 2;
+      applyViewportTransform();
+    }
+    viewportState.viewportWidth = viewport.clientWidth;
+    viewportState.viewportHeight = viewport.clientHeight;
+  }).observe(viewport);
+  const toolbar = $(".canvas-toolbar");
+  new ResizeObserver(() => {
+    $(".workspace-grid").style.setProperty("--canvas-toolbar-height", `${toolbar.offsetHeight}px`);
+  }).observe(toolbar);
+}
+
+async function requestNodeSelection(id) {
+  if (state.saving || state.loadingPolicy) return false;
+  if (id === state.selected) { setInspectorVisible(true); return true; }
+  if (!await editorControls.guard()) return false;
+  selectNode(id);
+  return true;
 }
 
 function selectNode(id) {
@@ -286,8 +625,20 @@ function selectNode(id) {
     (node.validations || [node]).forEach(addValidationRow);
   } else {
     $("#node-decision").value = node.decision; $("#node-band").value = node.risk_band; $("#node-limit").value = node.credit_limit;
+    $("#node-reason").value = node.reason_code;
   }
-  renderTree();
+  if (!state.layout || !$("#tree-nodes").children.length) renderTree();
+  $$(".tree-node").forEach((button) => {
+    const selected = button.dataset.nodeId === id;
+    button.classList.toggle("selected", selected);
+    button.setAttribute("aria-pressed", String(selected));
+  });
+  renderMinimap();
+  $("#node-location").textContent = id === state.policy.root_node
+    ? "Inicio de la política"
+    : `Nivel ${(state.layout?.depth[id] || 0) + 1} de la política`;
+  setInspectorVisible(true);
+  editorControls?.onSelection();
   syncEditorLock();
 }
 
@@ -393,7 +744,7 @@ function setEvaluationState(stage) {
   const button = $("#run-button");
   const states = {
     starting: ["Preparando evaluación…", "Validando la versión y el dataset."],
-    running: ["Ejecutando evaluación…", "Vertex AI está procesando los usuarios."],
+    running: ["Ejecutando evaluación…", "Procesando los usuarios con la versión seleccionada."],
     results: ["Cargando resultados…", "Actualizando métricas y recorridos."],
     success: ["Evaluación lista", "Las métricas corresponden a esta corrida."],
     error: ["No se pudo completar", "Revisá el mensaje de error e intentá nuevamente."],
@@ -441,14 +792,14 @@ function syncVersionUi() {
   const isProductive = selectedVersion === state.activeVersion;
   const isHistoricalRun = state.mode === "impact" && Boolean($("#run-select")?.value);
   $("#production-context").textContent = `Producción · v${state.activeVersion || "—"}`;
-  $("#version-pill").innerHTML = state.mode === "edit"
-    ? `<i></i> ${isProductive ? "Solo lectura" : "Editando"} · v${selectedVersion || "—"}`
-    : `<i></i> Evaluando · v${selectedVersion || "—"}`;
+  $("#focus-version-context").textContent = `${selectedVersion || "—"} · ${
+    isHistoricalRun ? "Evaluación histórica" : isProductive ? "Productiva · solo lectura" : "Candidata"
+  }`;
   $("#version-kind").textContent = isHistoricalRun
     ? "Revisión usada por la corrida"
     : (isProductive ? "Versión productiva" : "Versión candidata");
   $("#header-status").textContent = state.mode === "edit"
-    ? (isProductive ? "Productiva · bloqueada" : "Candidata")
+    ? (isProductive ? "Productiva" : "Candidata")
     : (isHistoricalRun ? "Histórica" : (isProductive ? "Productiva" : "Candidata"));
   $("#promote-button").hidden = state.mode !== "impact" || isProductive || isHistoricalRun;
   $("#publish-button").textContent = "Crear nueva versión";
@@ -457,7 +808,8 @@ function syncVersionUi() {
 
 function syncEditorLock() {
   const isProductive = state.editingVersion === state.activeVersion;
-  const locked = state.mode === "impact" || isProductive;
+  const locked = state.mode === "impact" || isProductive || state.saving || state.loadingPolicy;
+  editorControls?.syncControls();
   $$("#node-form input, #node-form select, #node-form button").forEach((control) => {
     control.disabled = locked || Boolean(control.closest("[hidden]"));
   });
@@ -478,8 +830,8 @@ function syncEditorLock() {
   kind.textContent = isProductive ? "Productiva · sólo lectura" : "Candidata · editable";
   guidance.classList.toggle("locked", isProductive);
   guidance.innerHTML = isProductive
-    ? "<strong>Versión productiva protegida</strong><span>Podés inspeccionarla o crear una candidata a partir de ella, pero no modificarla.</span>"
-    : "<strong>Candidata editable</strong><span>Aplicar guarda el cambio en esta versión. Producción no se modifica.</span>";
+    ? "<strong>Versión en producción</strong><span>Creá una candidata para empezar a editar.</span>"
+    : "<strong>Lista para editar</strong><span>Los cambios se guardan en esta candidata.</span>";
 }
 
 function renderVersionLibrary() {
@@ -487,12 +839,14 @@ function renderVersionLibrary() {
   if (!container) return;
   container.innerHTML = state.versions.map((item) => {
     const date = new Date(item.created_at).toLocaleDateString("es-AR");
-    return `<article class="version-item${item.active ? " productive" : ""}">
-      <div class="version-item-main"><i></i><div><strong>v${item.version}</strong><small>${date} · ${item.created_by}</small></div></div>
+    const version = escapeHtml(item.version);
+    const current = item.version === state.policy?.metadata.version;
+    return `<article class="version-item${item.active ? " productive" : ""}${current ? " current" : ""}">
+      <div class="version-item-main"><i></i><div><strong>${version}${current ? ' <span class="current-version">· Abierta</span>' : ""}</strong><small>${date} · ${escapeHtml(item.created_by)}</small></div></div>
       <div class="version-item-actions"><span class="version-state">${item.active ? "Productiva" : "Candidata"}</span>
-        <button class="button secondary" type="button" data-edit-version="${item.version}">${item.active ? "Ver" : "Editar"}</button>
-        <button class="button secondary" type="button" data-evaluate-version="${item.version}">Evaluar</button>
-        ${item.active ? "" : `<button class="button promote" type="button" data-promote-version="${item.version}">Productivizar</button>`}
+        <button class="button secondary" type="button" data-edit-version="${version}">${item.active ? "Ver" : "Editar"}</button>
+        <button class="button secondary" type="button" data-evaluate-version="${version}">Evaluar</button>
+        ${item.active ? "" : `<button class="button promote" type="button" data-promote-version="${version}">Productivizar</button>`}
       </div>
     </article>`;
   }).join("");
@@ -502,11 +856,11 @@ async function loadVersions({ evaluationVersion = null, editingVersion = state.e
   const priorEvaluation = $("#version-select").value;
   state.versions = await api("/api/policies");
   state.activeVersion = state.versions.find((item) => item.active)?.version || null;
-  const options = state.versions.map((item) =>
-    `<option value="${item.version}">${item.version}${item.active ? " · Productiva" : " · Candidata"}</option>`
-  ).join("");
-  $("#version-select").innerHTML = options;
-  $("#editor-version-select").innerHTML = options;
+  [$("#version-select"), $("#editor-version-select")].forEach((select) => {
+    select.replaceChildren(...state.versions.map((item) => new Option(
+      `${item.version} · ${item.active ? "Productiva" : "Candidata"}`, item.version,
+    )));
+  });
   const exists = (version) => state.versions.some((item) => item.version === version);
   const rememberedEditor = window.localStorage.getItem("credit-policy-editor-version");
   state.editingVersion = [editingVersion, rememberedEditor].find(exists)
@@ -520,27 +874,55 @@ async function loadVersions({ evaluationVersion = null, editingVersion = state.e
   syncVersionUi();
 }
 
+async function withPolicyLoading(load) {
+  if (state.loadingPolicy) return false;
+  state.loadingPolicy = true;
+  const controls = $$("button, input, select").filter((control) => !control.disabled);
+  controls.forEach((control) => { control.disabled = true; });
+  editorControls.syncControls();
+  try {
+    await load();
+    return true;
+  } catch (error) {
+    $("#editor-version-select").value = state.editingVersion;
+    if (state.mode === "impact") $("#version-select").value = state.policy.metadata.version;
+    throw error;
+  } finally {
+    state.loadingPolicy = false;
+    controls.forEach((control) => { control.disabled = false; });
+    syncEditorLock();
+  }
+}
+
 async function loadEditorVersion(version) {
-  state.policy = await api(`/api/policies/${encodeURIComponent(version)}`);
-  state.editingVersion = version;
-  state.selected = state.policy.root_node;
-  state.editorDraft = structuredClone(state.policy);
-  state.editorSelected = state.selected;
-  window.localStorage.setItem("credit-policy-editor-version", version);
-  $("#editor-version-select").value = version;
-  viewportState.initialized = false;
-  selectNode(state.selected);
-  syncVersionUi();
+  if (!await editorControls.guard()) { $("#editor-version-select").value = state.editingVersion; return false; }
+  return withPolicyLoading(async () => {
+    state.policy = await api(`/api/policies/${encodeURIComponent(version)}`);
+    state.editingVersion = version;
+    editorControls.resetHistory();
+    state.selected = state.policy.root_node;
+    state.editorDraft = structuredClone(state.policy);
+    state.editorSelected = state.selected;
+    window.localStorage.setItem("credit-policy-editor-version", version);
+    $("#editor-version-select").value = version;
+    viewportState.initialized = false;
+    renderTree();
+    selectNode(state.selected);
+    syncVersionUi();
+  });
 }
 
 async function loadPolicyVersion(version, policySha256 = null, loadHistory = true) {
-  const revisionQuery = policySha256 ? `?policy_sha256=${encodeURIComponent(policySha256)}` : "";
-  state.policy = await api(`/api/policies/${encodeURIComponent(version)}${revisionQuery}`);
-  state.selected = state.policy.root_node;
-  viewportState.initialized = false;
-  selectNode(state.selected);
-  if (loadHistory) await loadRuns(version);
-  syncVersionUi();
+  return withPolicyLoading(async () => {
+    const revisionQuery = policySha256 ? `?policy_sha256=${encodeURIComponent(policySha256)}` : "";
+    state.policy = await api(`/api/policies/${encodeURIComponent(version)}${revisionQuery}`);
+    state.selected = state.policy.root_node;
+    viewportState.initialized = false;
+    renderTree();
+    selectNode(state.selected);
+    if (loadHistory) await loadRuns(version);
+    syncVersionUi();
+  });
 }
 
 async function loadRuns(version = state.policy?.metadata.version, preferredRunId = null) {
@@ -577,53 +959,16 @@ async function initialize() {
   await loadEditorVersion(state.editingVersion);
   await loadRuns($("#version-select").value);
   if (new URLSearchParams(window.location.search).get("view") === "impact") await setMode("impact");
+  if (window.matchMedia("(max-width: 1000px)").matches) setInspectorVisible(false);
 }
-
-$("#node-form").addEventListener("submit", async (event) => {
-  event.preventDefault();
-  if (state.editingVersion === state.activeVersion) {
-    toast("La versión productiva es de solo lectura", true);
-    return;
-  }
-  const policy = structuredClone(state.policy);
-  const node = policy.nodes[state.selected]; node.label = $("#node-label").value.trim();
-  if (node.type === "condition") {
-    try { node.validations = readValidations(); }
-    catch (error) { toast(error.message, true); return; }
-    node.combination = $("#node-combination").value;
-    delete node.field;
-    delete node.operator;
-    delete node.value;
-  }
-  else { node.decision = $("#node-decision").value; node.risk_band = $("#node-band").value; node.credit_limit = Number($("#node-limit").value); }
-  const button = $(".apply-button");
-  button.disabled = true;
-  button.textContent = "Guardando…";
-  try {
-    await api(`/api/policies/${encodeURIComponent(state.editingVersion)}`, {
-      method: "PUT",
-      body: JSON.stringify({ policy }),
-    });
-    state.policy = policy;
-    state.editorDraft = structuredClone(policy);
-    state.editorSelected = node.id;
-    selectNode(node.id);
-    await loadVersions({ editingVersion: state.editingVersion });
-    toast(`Cambio guardado en la candidata ${state.editingVersion}`);
-  } catch (error) {
-    toast(`No se pudo guardar el cambio: ${error.message}`, true);
-  } finally {
-    button.textContent = "Aplicar cambios";
-    syncEditorLock();
-  }
-});
 
 $("#validate-button").addEventListener("click", async () => {
   try { const result = await api("/api/policies/validate", { method: "POST", body: JSON.stringify({ policy: state.policy }) }); toast(`Política válida · ${result.nodes} nodos`); }
   catch (error) { toast(`No es válida: ${error.message}`, true); }
 });
 
-function openNewVersionDialog() {
+async function openNewVersionDialog() {
+  if (!await editorControls.guard()) return;
   $("#publish-version").value = "";
   $("#publish-author").value = state.policy.metadata.created_by;
   $("#publish-dialog").showModal();
@@ -641,6 +986,7 @@ $("#publish-form").addEventListener("submit", async (event) => {
     await api("/api/policies/publish", { method: "POST", body: JSON.stringify({ policy }) });
     state.policy = policy;
     state.editingVersion = policy.metadata.version;
+    editorControls.resetHistory();
     state.editorDraft = structuredClone(policy);
     state.editorSelected = state.selected;
     window.localStorage.setItem("credit-policy-editor-version", policy.metadata.version);
@@ -653,7 +999,7 @@ async function executeEvaluation() {
   setEvaluationState("starting");
   await new Promise((resolve) => window.requestAnimationFrame(resolve));
   try {
-    if (state.mode !== "impact") await setMode("impact");
+    if (state.mode !== "impact" && !await setMode("impact")) { setEvaluationState(null); return; }
     setEvaluationState("running");
     const result = await api("/api/runs", { method: "POST", body: JSON.stringify({ instances: [{}], parameters: { limit: Number($("#run-limit").value), policy_version: state.policy.metadata.version } }) });
     setEvaluationState("results");
@@ -673,7 +1019,9 @@ async function executeEvaluation() {
 $("#run-button").addEventListener("click", executeEvaluation);
 
 async function setMode(mode) {
-  if (mode === state.mode) return;
+  if (state.saving || state.loadingPolicy) return false;
+  if (mode === state.mode) return true;
+  if (!await editorControls.guard()) return false;
   if (state.mode === "edit" && mode === "impact") {
     state.editorDraft = structuredClone(state.policy);
     state.editorSelected = state.selected;
@@ -681,7 +1029,6 @@ async function setMode(mode) {
   }
   state.mode = mode;
   document.body.dataset.mode = mode;
-  $$('[data-tree-mode]').forEach((item) => item.classList.toggle("active", item.dataset.treeMode === mode));
   $$('.nav-item').forEach((item) => item.classList.toggle("active", (mode === "impact") === (item.dataset.view === "dashboard")));
   $("#view-title").textContent = mode === "impact" ? "Laboratorio de evaluación" : "Crédito de consumo";
   $("#canvas-subtitle").textContent = mode === "impact"
@@ -695,17 +1042,18 @@ async function setMode(mode) {
     state.selected = state.editorSelected && state.policy.nodes[state.editorSelected]
       ? state.editorSelected
       : state.policy.root_node;
+    renderTree();
     selectNode(state.selected);
   }
   syncVersionUi();
   viewportState.initialized = false;
   window.requestAnimationFrame(renderTree);
+  return true;
 }
 
-$$('[data-tree-mode]').forEach((button) => button.addEventListener("click", async () => setMode(button.dataset.treeMode)));
-
 $$('.nav-item').forEach((button) => button.addEventListener("click", async () => {
-  await setMode(button.dataset.view === "dashboard" ? "impact" : "edit");
+  try { await setMode(button.dataset.view === "dashboard" ? "impact" : "edit"); }
+  catch (error) { toast(`No se pudo abrir la vista: ${error.message}`, true); }
 }));
 
 $("#version-select").addEventListener("change", async (event) => {
@@ -740,7 +1088,8 @@ $("#run-select").addEventListener("change", async (event) => {
   finally { setMetricsLoading(false); }
 });
 
-function openPromotion(version) {
+async function openPromotion(version) {
+  if (!await editorControls.guard()) return;
   state.pendingPromotionVersion = version;
   $("#promote-version").textContent = version;
   $("#promote-dialog").showModal();
@@ -763,31 +1112,36 @@ $("#promote-form").addEventListener("submit", async (event) => {
   } catch (error) { toast(`No se pudo promover: ${error.message}`, true); }
 });
 
-$("#versions-button").addEventListener("click", () => $("#versions-dialog").showModal());
+$("#versions-button").addEventListener("click", () => {
+  renderVersionLibrary();
+  $("#versions-dialog").showModal();
+});
 $("#versions-close").addEventListener("click", () => $("#versions-dialog").close());
 $("#new-version-button").addEventListener("click", () => {
   $("#versions-dialog").close();
   openNewVersionDialog();
 });
 $("#versions-list").addEventListener("click", async (event) => {
-  const editButton = event.target.closest("[data-edit-version]");
-  const evaluateButton = event.target.closest("[data-evaluate-version]");
-  const promoteButton = event.target.closest("[data-promote-version]");
-  if (editButton) {
-    const version = editButton.dataset.editVersion;
-    $("#versions-dialog").close();
-    if (state.mode !== "edit") await setMode("edit");
-    await loadEditorVersion(version);
-  } else if (evaluateButton) {
-    const version = evaluateButton.dataset.evaluateVersion;
-    $("#version-select").value = version;
-    $("#versions-dialog").close();
-    if (state.mode === "impact") await loadPolicyVersion(version);
-    else await setMode("impact");
-  } else if (promoteButton) {
-    $("#versions-dialog").close();
-    openPromotion(promoteButton.dataset.promoteVersion);
-  }
+  try {
+    const editButton = event.target.closest("[data-edit-version]");
+    const evaluateButton = event.target.closest("[data-evaluate-version]");
+    const promoteButton = event.target.closest("[data-promote-version]");
+    if (editButton) {
+      const version = editButton.dataset.editVersion;
+      $("#versions-dialog").close();
+      if (state.mode !== "edit" && !await setMode("edit")) return;
+      await loadEditorVersion(version);
+    } else if (evaluateButton) {
+      const version = evaluateButton.dataset.evaluateVersion;
+      $("#versions-dialog").close();
+      if (state.mode !== "impact" && !await setMode("impact")) return;
+      $("#version-select").value = version;
+      await loadPolicyVersion(version);
+    } else if (promoteButton) {
+      $("#versions-dialog").close();
+      openPromotion(promoteButton.dataset.promoteVersion);
+    }
+  } catch (error) { toast(`No se pudo abrir la versión: ${error.message}`, true); }
 });
 
 $("#help-button").addEventListener("click", () => $("#help-dialog").showModal());
@@ -823,5 +1177,13 @@ function registerWebMcp() {
   });
 }
 
+editorControls = setupEditorControls({
+  state, api, toast, renderTree, selectNode, focusNode, syncEditorLock, syncVersionUi,
+  readValidations, fieldLabels, escapeHtml, requestNodeSelection,
+  revealInspector: () => setInspectorVisible(true),
+});
+window.addEventListener("beforeunload", (event) => {
+  if (state.editorDirty || state.saving) { event.preventDefault(); event.returnValue = ""; }
+});
 setupViewportInteractions();
 initialize().then(registerWebMcp).catch((error) => toast(`No se pudo iniciar: ${error.message}`, true));

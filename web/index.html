@@ -6,7 +6,7 @@
     <meta name="color-scheme" content="light" />
     <meta name="description" content="Diseñá, versioná y explicá políticas de crédito sin tocar código." />
     <title>Credit Policy Studio</title>
-    <link rel="stylesheet" href="/assets/styles.css?v=5" />
+    <link rel="stylesheet" href="/assets/styles.css?v=8" />
   </head>
   <body data-mode="edit">
     <div class="shell">
@@ -35,10 +35,7 @@
           <div class="header-actions">
             <button class="button secondary" id="versions-button" type="button">Versiones</button>
             <button class="help-trigger" id="help-button" type="button" aria-label="Cómo usar el laboratorio" title="Cómo usar">?</button>
-            <span class="production-context" id="production-context">Producción · cargando…</span>
-            <span class="version-pill" id="version-pill"><i></i> Borrador</span>
             <button class="button promote" id="promote-button" type="button" hidden>Promover a productiva</button>
-            <button class="button secondary" id="validate-button">Validar</button>
             <button class="button primary" id="publish-button">Crear nueva versión</button>
           </div>
         </header>
@@ -46,7 +43,7 @@
         <section class="content">
           <div class="editor-summary" aria-label="Contexto de edición">
             <div class="editor-version-picker">
-              <label for="editor-version-select">VERSIÓN A EDITAR</label>
+              <label for="editor-version-select">Versión de la política</label>
               <select id="editor-version-select" aria-label="Versión a editar"></select>
               <small id="editor-version-kind">Sincronizando…</small>
             </div>
@@ -54,6 +51,7 @@
               <strong>Candidata editable</strong>
               <span>Aplicar guarda el cambio en esta versión. Producción no se modifica.</span>
             </div>
+            <span class="production-context" id="production-context">Producción · cargando…</span>
           </div>
           <div class="impact-summary" aria-label="Resumen de impacto">
             <div class="impact-intro"><label for="version-select">VERSIÓN A EVALUAR</label><select id="version-select" aria-label="Versión a evaluar"></select><small id="version-kind">Sincronizando…</small></div>
@@ -67,29 +65,40 @@
           <div class="workspace-grid">
             <section class="canvas-card">
               <div class="canvas-toolbar">
-                <div><h2 id="canvas-title">Árbol de decisión</h2><p id="canvas-subtitle">Seleccioná un nodo para editar su regla.</p></div>
-                <div class="segmented" role="group" aria-label="Modo de visualización">
-                  <button class="active" data-tree-mode="edit">Editar</button><button data-tree-mode="impact">Resultados</button>
+                <div class="canvas-heading"><h2 id="canvas-title">Árbol de decisión <span id="tree-size"></span></h2><p id="canvas-subtitle">Seleccioná un nodo para editar su regla.</p><span id="focus-version-context" hidden></span></div>
+                <div class="canvas-actions">
+                  <button class="button secondary" id="add-node-button" type="button"><span aria-hidden="true">+</span> Nodo</button>
+                  <button class="icon-button" id="find-node-button" type="button" aria-label="Buscar un nodo" title="Buscar un nodo (⌘ K)"><svg viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4 4"/></svg></button>
+                  <button class="icon-button" id="undo-layout" type="button" aria-label="Deshacer movimiento de cajas" title="Deshacer movimiento de cajas" hidden><svg viewBox="0 0 24 24"><path d="M9 5 4 10l5 5M4 10h10a6 6 0 0 1 0 12"/></svg></button>
+                  <button class="icon-button" id="auto-layout" type="button" aria-label="Distribuir cajas automáticamente" title="Distribuir cajas automáticamente"><svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="5" rx="1"/><rect x="2" y="16" width="6" height="5" rx="1"/><rect x="16" y="16" width="6" height="5" rx="1"/><path d="M12 8v4M5 16v-4h14v4"/></svg></button>
+                  <button class="button secondary" id="validate-button" type="button">Validar</button>
+                  <button class="icon-button" id="toggle-inspector" type="button" aria-label="Ocultar panel de detalles" aria-controls="inspector" aria-expanded="true" title="Ocultar panel de detalles"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/></svg></button>
+                  <button class="icon-button" id="focus-mode-button" type="button" aria-label="Activar modo enfoque" aria-pressed="false" title="Modo enfoque · ampliar árbol"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H3v5m0-5 6 6m7 12h5v-5m0 5-6-6"/></svg><span class="focus-mode-label">Salir <kbd>esc</kbd></span></button>
                 </div>
               </div>
-              <div class="tree-viewport" id="tree-viewport" tabindex="0" aria-label="Lienzo navegable. Arrastrá para mover y usá la rueda para acercar o alejar.">
+              <div class="tree-viewport" id="tree-viewport" tabindex="0" aria-label="Árbol de decisión. Arrastrá o usá las flechas para moverte; más y menos para zoom; cero para encuadrar; F para centrar el nodo seleccionado.">
                 <div class="tree-stage" id="tree-stage"><svg id="tree-links" aria-hidden="true"></svg><div id="tree-nodes"></div></div>
-                <div class="canvas-hint"><svg viewBox="0 0 24 24"><path d="M9 11V6a1 1 0 0 1 2 0v4-5a1 1 0 0 1 2 0v5-4a1 1 0 0 1 2 0v5-3a1 1 0 0 1 2 0v6c0 4-2 6-6 6h-1c-2 0-3-1-4-3l-2-4a1 1 0 0 1 2-1l3 3"/></svg><span>Arrastrá para mover · rueda para zoom</span></div>
+                <button class="minimap" id="minimap" type="button" aria-label="Minimapa. Hacé clic para navegar; Enter para encuadrar todo el árbol." title="Hacé clic para moverte por el árbol"><span>Vista general</span><svg id="minimap-svg" viewBox="0 0 180 104" aria-hidden="true"><g id="minimap-content"></g><rect id="minimap-window"/></svg></button>
                 <div class="canvas-controls" aria-label="Controles del lienzo">
+                  <button type="button" id="focus-node" aria-label="Centrar nodo seleccionado" title="Centrar nodo seleccionado (F)"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="6"/><path d="M12 2v4m0 12v4M2 12h4m12 0h4"/></svg></button>
+                  <button type="button" id="fit-tree" aria-label="Encuadrar árbol completo" title="Encuadrar árbol completo (0)"><svg viewBox="0 0 24 24"><path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5"/></svg></button>
+                  <span class="control-divider"></span>
                   <button type="button" id="zoom-out" aria-label="Alejar" title="Alejar">−</button>
-                  <button type="button" id="zoom-reset" aria-label="Encuadrar árbol" title="Encuadrar árbol"><span id="zoom-level">100%</span></button>
+                  <button type="button" id="zoom-reset" aria-label="Ver al 100 por ciento" title="Ver al 100%"><span id="zoom-level">100%</span></button>
                   <button type="button" id="zoom-in" aria-label="Acercar" title="Acercar">+</button>
                 </div>
               </div>
-              <div class="legend"><span><i class="dot condition"></i>Condición</span><span><i class="dot approved"></i>Aprobación</span><span><i class="dot review"></i>Revisión</span><span><i class="dot rejected"></i>Rechazo</span></div>
+              <div class="legend"><span><i class="dot condition"></i>Condición</span><span><i class="dot approved"></i>Aprobación</span><span><i class="dot review"></i>Revisión</span><span><i class="dot rejected"></i>Rechazo</span><span class="canvas-hint">Arrastrá las cajas para ordenar · rueda para zoom</span></div>
             </section>
 
             <aside class="inspector" id="inspector">
               <div class="inspector-heading">
-                <div><span class="panel-kicker">NODO SELECCIONADO</span><h2 id="inspector-title">Nodo</h2></div><span class="node-tag" id="node-tag">CONDICIÓN</span>
+                <div><span class="panel-kicker">DETALLES DEL NODO</span><h2 id="inspector-title">Nodo</h2></div><span class="node-tag" id="node-tag">CONDICIÓN</span>
               </div>
+              <div class="node-location"><span id="node-location"></span><button class="text-button" id="locate-node" type="button">Ubicar en el árbol <span aria-hidden="true">↗</span></button></div>
+              <div class="node-connections" id="node-connections"></div>
               <form id="node-form">
-                <label>Nombre visible<input id="node-label" name="label" /></label>
+                <label>Nombre visible<input id="node-label" name="label" required maxlength="160" /></label>
                 <div id="condition-fields">
                   <label>Tipo de combinación<select id="node-combination" aria-describedby="combination-help"><option value="none">Sin combinación</option><option value="AND">AND</option><option value="OR">OR</option></select></label>
                   <p class="field-help" id="combination-help"></p>
@@ -97,11 +106,15 @@
                   <button class="button secondary full" id="add-validation" type="button">+ Agregar validación</button>
                 </div>
                 <div id="decision-fields" hidden>
-                  <label>Decisión<select id="node-decision"><option>APPROVED</option><option>REVIEW</option><option>REJECTED</option></select></label>
+                  <label>Decisión<select id="node-decision"><option value="APPROVED">Aprobación</option><option value="REVIEW">Revisión manual</option><option value="REJECTED">Rechazo</option></select></label>
                   <div class="field-row"><label>Banda<input id="node-band" /></label><label>Límite<input id="node-limit" type="number" min="0" /></label></div>
+                  <label>Motivo de decisión<input id="node-reason" /></label>
                 </div>
-                <button class="button full apply-button" type="submit">Aplicar cambios</button>
               </form>
+              <div class="editor-savebar" id="editor-savebar">
+                <div class="editor-save-status"><span id="editor-save-status" role="status">Guardado</span><button class="text-button" id="undo-policy-change" type="button" disabled>Deshacer cambio</button></div>
+                <button class="button full apply-button" type="submit" form="node-form">Aplicar cambios</button>
+              </div>
               <template id="validation-template">
                 <fieldset class="validation-row">
                   <legend>Validación</legend>
@@ -125,10 +138,59 @@
     </div>
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
-    <dialog id="versions-dialog" class="versions-dialog">
+    <dialog id="new-node-dialog" class="new-node-dialog" aria-labelledby="new-node-title">
+      <form id="new-node-form">
+        <button class="dialog-close" id="new-node-close" type="button" aria-label="Cerrar">×</button>
+        <p class="panel-kicker">EDITAR ÁRBOL</p><h2 id="new-node-title">Agregar nodo</h2>
+        <p class="help-intro" id="new-node-context"></p>
+        <div class="node-type-picker" role="group" aria-label="Tipo de nodo">
+          <label><input type="radio" name="new-node-type" value="condition" checked /><span><strong>Condición</strong><small>Una regla con dos caminos</small></span></label>
+          <label><input type="radio" name="new-node-type" value="decision" /><span><strong>Resultado</strong><small>Una decisión final</small></span></label>
+        </div>
+        <label>Nombre visible<input id="new-node-label" required maxlength="160" placeholder="Por ejemplo, ingreso mínimo" /></label>
+        <label>Ubicación<select id="new-node-placement"></select></label>
+        <div id="new-condition-fields">
+          <label>Variable<select id="new-node-field"></select></label>
+          <div class="field-row"><label>Operador<select id="new-node-operator"><option value="gte">Mayor o igual (≥)</option><option value="gt">Mayor que (&gt;)</option><option value="lte">Menor o igual (≤)</option><option value="lt">Menor que (&lt;)</option><option value="eq">Igual (=)</option><option value="neq">Distinto (≠)</option></select></label><label>Umbral<input id="new-node-value" type="number" step="any" required /></label></div>
+          <label>Si no se cumple<select id="new-node-fallback"></select></label>
+        </div>
+        <div id="new-result-fields">
+          <label>Decisión<select id="new-node-decision"><option value="REVIEW">Revisión manual</option><option value="APPROVED">Aprobación</option><option value="REJECTED">Rechazo</option></select></label>
+          <div class="field-row"><label>Banda<input id="new-node-band" placeholder="Sin clasificar" /></label><label>Límite<input id="new-node-limit" type="number" min="0" step="any" value="0" required /></label></div>
+          <label>Motivo de decisión <span class="optional-label">opcional</span><input id="new-node-reason" placeholder="Por ejemplo, revisión de ingresos" /></label>
+        </div>
+        <p class="change-preview" id="new-node-preview"></p>
+        <p class="inline-error" id="new-node-error" role="alert" hidden></p>
+        <menu><button class="button secondary" id="new-node-cancel" type="button">Cancelar</button><button class="button primary" id="new-node-submit" type="submit">Agregar nodo</button></menu>
+      </form>
+    </dialog>
+    <dialog id="connect-node-dialog" aria-labelledby="connect-node-title">
+      <form id="connect-node-form">
+        <button class="dialog-close" id="connect-node-close" type="button" aria-label="Cerrar">×</button>
+        <p class="panel-kicker">RECORRIDO</p><h2 id="connect-node-title">Cambiar destino</h2>
+        <p class="help-intro" id="connect-node-context"></p>
+        <label>Nodo de destino<select id="connect-node-target" required></select></label>
+        <p class="change-preview" id="connect-node-preview"></p>
+        <p class="inline-error" id="connect-node-error" role="alert" hidden></p>
+        <menu><button class="button secondary" id="connect-node-cancel" type="button">Cancelar</button><button class="button primary" type="submit">Guardar conexión</button></menu>
+      </form>
+    </dialog>
+    <dialog id="unsaved-dialog" aria-labelledby="unsaved-title">
+      <h2 id="unsaved-title">Tenés cambios sin guardar</h2>
+      <p class="help-intro">Guardá la edición de esta caja antes de continuar, o descartá los cambios pendientes.</p>
+      <div class="unsaved-actions"><button class="button primary" id="unsaved-save" type="button">Guardar y continuar</button><button class="button secondary" id="unsaved-discard" type="button">Descartar cambios</button><button class="text-button" id="unsaved-stay" type="button">Seguir editando</button></div>
+    </dialog>
+    <dialog id="node-search-dialog" class="node-search-dialog" aria-labelledby="node-search-title">
+      <button class="dialog-close" id="node-search-close" type="button" aria-label="Cerrar búsqueda">×</button>
+      <h2 id="node-search-title">Buscar en el árbol</h2>
+      <label for="node-search">Nombre, variable o tipo de nodo<input id="node-search" type="search" autocomplete="off" placeholder="Por ejemplo, ingreso mensual" /></label>
+      <p class="search-count" id="node-search-count" role="status"></p>
+      <div class="node-search-results" id="node-search-results"></div>
+    </dialog>
+    <dialog id="versions-dialog" class="versions-dialog" aria-labelledby="versions-title">
       <button class="dialog-close" id="versions-close" type="button" aria-label="Cerrar">×</button>
-      <p class="panel-kicker">BIBLIOTECA</p><h2>Versiones de la política</h2>
-      <p class="help-intro">Las candidatas admiten iteraciones; al productivizarlas quedan congeladas. Cada corrida conserva la revisión exacta que utilizó.</p>
+      <p class="panel-kicker">BIBLIOTECA</p><h2 id="versions-title">Versiones de la política</h2>
+      <p class="help-intro">Elegí una candidata para editar o consultá la versión en producción.</p>
       <button class="button secondary" id="new-version-button" type="button">Guardar el árbol actual como nueva versión</button>
       <div class="versions-list" id="versions-list"></div>
     </dialog>
@@ -161,6 +223,6 @@
         <menu><button class="button secondary" value="cancel">Cancelar</button><button class="button primary" id="confirm-publish" value="default">Guardar versión</button></menu>
       </form>
     </dialog>
-    <script src="/assets/app.js?v=19" defer></script>
+    <script src="/assets/app.js?v=22" type="module"></script>
   </body>
 </html>
