@@ -1,3 +1,5 @@
+import { edges, hasNode, reachableNodes } from "./policy-editor.mjs";
+
 export const NODE_WIDTH = 216;
 export const NODE_HEIGHT = 96;
 export const LEVEL_GAP = 156;
@@ -9,10 +11,8 @@ const PADDING = 32;
 export function hierarchy(policy) {
   const ids = Object.keys(policy.nodes);
   const children = (id) => {
-    const node = policy.nodes[id];
-    return node?.type === "condition"
-      ? [...new Set([node.true_node, node.false_node])].filter((child) => policy.nodes[child])
-      : [];
+    return [...new Set(edges(policy.nodes[id]).map(({ target }) => target))]
+      .filter((child) => hasNode(policy, child));
   };
   const incoming = Object.fromEntries(ids.map((id) => [id, 0]));
   const depth = Object.fromEntries(ids.map((id) => [id, 0]));
@@ -25,6 +25,10 @@ export function hierarchy(policy) {
       if (--incoming[child] === 0) queue.push(child);
     });
   }
+
+  const connected = reachableNodes(policy);
+  const detachedLevel = Math.max(0, ...[...connected].map((id) => depth[id])) + 1;
+  ids.filter((id) => !connected.has(id)).forEach((id) => { depth[id] = detachedLevel; });
 
   // Use a spanning tree for horizontal order, while keeping every graph edge.
   const seen = new Set();
@@ -63,7 +67,7 @@ export function hierarchy(policy) {
     });
   });
   return {
-    x, depth, children,
+    x, depth, children, connected,
     width: Math.max(...Object.values(x)) + NODE_WIDTH + PADDING,
     height: Math.max(...Object.values(depth)) * LEVEL_GAP + NODE_HEIGHT + PADDING * 2,
   };

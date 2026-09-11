@@ -6,7 +6,7 @@
     <meta name="color-scheme" content="light" />
     <meta name="description" content="Diseñá, versioná y explicá políticas de crédito sin tocar código." />
     <title>Credit Policy Studio</title>
-    <link rel="stylesheet" href="/assets/styles.css?v=8" />
+    <link rel="stylesheet" href="/assets/styles.css?v=9" />
   </head>
   <body data-mode="edit">
     <div class="shell">
@@ -49,7 +49,7 @@
             </div>
             <div class="editor-guidance" id="editor-guidance">
               <strong>Candidata editable</strong>
-              <span>Aplicar guarda el cambio en esta versión. Producción no se modifica.</span>
+              <span>Guardá el árbol completo cuando esté listo. Producción no se modifica.</span>
             </div>
             <span class="production-context" id="production-context">Producción · cargando…</span>
           </div>
@@ -76,6 +76,11 @@
                   <button class="icon-button" id="focus-mode-button" type="button" aria-label="Activar modo enfoque" aria-pressed="false" title="Modo enfoque · ampliar árbol"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H3v5m0-5 6 6m7 12h5v-5m0 5-6-6"/></svg><span class="focus-mode-label">Salir <kbd>esc</kbd></span></button>
                 </div>
               </div>
+              <div class="draft-history" id="draft-history" role="group" aria-label="Historial del borrador">
+                <button class="button secondary" id="undo-draft" type="button" title="Deshacer (⌘Z / Ctrl+Z)" aria-keyshortcuts="Meta+Z Control+Z" disabled>↶ Deshacer</button>
+                <button class="button secondary" id="redo-draft" type="button" title="Rehacer (⌘⇧Z / Ctrl+Shift+Z / Ctrl+Y)" aria-keyshortcuts="Meta+Shift+Z Control+Shift+Z Control+Y" disabled>↷ Rehacer</button>
+              </div>
+              <div class="draft-status" id="draft-status" role="status" aria-live="polite" hidden></div>
               <div class="tree-viewport" id="tree-viewport" tabindex="0" aria-label="Árbol de decisión. Arrastrá o usá las flechas para moverte; más y menos para zoom; cero para encuadrar; F para centrar el nodo seleccionado.">
                 <div class="tree-stage" id="tree-stage"><svg id="tree-links" aria-hidden="true"></svg><div id="tree-nodes"></div></div>
                 <button class="minimap" id="minimap" type="button" aria-label="Minimapa. Hacé clic para navegar; Enter para encuadrar todo el árbol." title="Hacé clic para moverte por el árbol"><span>Vista general</span><svg id="minimap-svg" viewBox="0 0 180 104" aria-hidden="true"><g id="minimap-content"></g><rect id="minimap-window"/></svg></button>
@@ -112,8 +117,9 @@
                 </div>
               </form>
               <div class="editor-savebar" id="editor-savebar">
-                <div class="editor-save-status"><span id="editor-save-status" role="status">Guardado</span><button class="text-button" id="undo-policy-change" type="button" disabled>Deshacer cambio</button></div>
-                <button class="button full apply-button" type="submit" form="node-form">Aplicar cambios</button>
+                <div class="module-actions"><button class="text-button" id="set-root" type="button">Usar como inicio</button><button class="text-button" id="delete-module" type="button">Eliminar módulo</button></div>
+                <div class="editor-save-status"><span id="editor-save-status" role="status">Guardado</span><button class="text-button" id="discard-draft" type="button" disabled>Descartar cambios</button></div>
+                <button class="button full apply-button" type="submit" form="node-form">Guardar política</button>
               </div>
               <template id="validation-template">
                 <fieldset class="validation-row">
@@ -138,6 +144,18 @@
     </div>
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <dialog id="delete-module-dialog">
+      <form id="delete-module-form">
+        <h2>Eliminar módulo</h2><p id="delete-module-detail"></p>
+        <label id="replacement-root-field">Nuevo inicio<select id="replacement-root"></select></label>
+        <p>Los módulos siguientes se conservan. Las conexiones que llegaban a éste quedarán pendientes hasta que elijas otro destino.</p>
+        <menu><button class="button secondary" type="button" data-close-dialog="delete-module-dialog">Cancelar</button><button class="button primary" type="submit">Eliminar del borrador</button></menu>
+      </form>
+    </dialog>
+    <dialog id="discard-dialog">
+      <h2>Descartar cambios sin guardar</h2><p>Se restaurará la última política guardada. Los módulos y conexiones agregados en este borrador se perderán.</p>
+      <menu><button class="button secondary" type="button" data-close-dialog="discard-dialog">Volver</button><button class="button primary" id="confirm-discard" type="button">Descartar cambios</button></menu>
+    </dialog>
     <dialog id="new-node-dialog" class="new-node-dialog" aria-labelledby="new-node-title">
       <form id="new-node-form">
         <button class="dialog-close" id="new-node-close" type="button" aria-label="Cerrar">×</button>
@@ -169,15 +187,15 @@
         <button class="dialog-close" id="connect-node-close" type="button" aria-label="Cerrar">×</button>
         <p class="panel-kicker">RECORRIDO</p><h2 id="connect-node-title">Cambiar destino</h2>
         <p class="help-intro" id="connect-node-context"></p>
-        <label>Nodo de destino<select id="connect-node-target" required></select></label>
+        <label>Nodo de destino<select id="connect-node-target"></select></label>
         <p class="change-preview" id="connect-node-preview"></p>
         <p class="inline-error" id="connect-node-error" role="alert" hidden></p>
-        <menu><button class="button secondary" id="connect-node-cancel" type="button">Cancelar</button><button class="button primary" type="submit">Guardar conexión</button></menu>
+        <menu><button class="button secondary" id="connect-node-cancel" type="button">Cancelar</button><button class="button primary" type="submit">Aplicar al borrador</button></menu>
       </form>
     </dialog>
     <dialog id="unsaved-dialog" aria-labelledby="unsaved-title">
       <h2 id="unsaved-title">Tenés cambios sin guardar</h2>
-      <p class="help-intro">Guardá la edición de esta caja antes de continuar, o descartá los cambios pendientes.</p>
+      <p class="help-intro">Guardá el árbol completo antes de continuar, o descartá todos los cambios del borrador.</p>
       <div class="unsaved-actions"><button class="button primary" id="unsaved-save" type="button">Guardar y continuar</button><button class="button secondary" id="unsaved-discard" type="button">Descartar cambios</button><button class="text-button" id="unsaved-stay" type="button">Seguir editando</button></div>
     </dialog>
     <dialog id="node-search-dialog" class="node-search-dialog" aria-labelledby="node-search-title">
@@ -200,7 +218,7 @@
       <p class="help-intro">Probá cambios sin afectar consumidores y promovelos sólo cuando el resultado sea el esperado.</p>
       <ol class="guide-steps">
         <li><span>1</span><div><strong>Elegí la versión a editar</strong><p>En Política, seleccioná una candidata. La productiva puede inspeccionarse, pero está bloqueada.</p></div></li>
-        <li><span>2</span><div><strong>Aplicá cada cambio</strong><p>Editá una regla y elegí <b>Aplicar cambios</b>. El cambio queda guardado en esa misma candidata.</p></div></li>
+        <li><span>2</span><div><strong>Construí la política</strong><p>Agregá nodos y conectá las ramas; usá <b>Deshacer / Rehacer</b> y elegí <b>Guardar política</b> cuando el árbol esté completo.</p></div></li>
         <li><span>3</span><div><strong>Evaluá una versión</strong><p>En Evaluación, elegí una versión y ejecutala contra el dataset. Los resultados pertenecen sólo a esa corrida.</p></div></li>
         <li><span>4</span><div><strong>Leé el recorrido</strong><p>Los números sobre las ramas muestran cuántos usuarios siguieron cada camino.</p></div></li>
         <li><span>5</span><div><strong>Promové a productiva</strong><p>Cuando estés conforme, promovela. Desde entonces será la versión usada por consumidores que no indiquen otra.</p></div></li>
@@ -223,6 +241,6 @@
         <menu><button class="button secondary" value="cancel">Cancelar</button><button class="button primary" id="confirm-publish" value="default">Guardar versión</button></menu>
       </form>
     </dialog>
-    <script src="/assets/app.js?v=22" type="module"></script>
+    <script src="/assets/app.js?v=23" type="module"></script>
   </body>
 </html>

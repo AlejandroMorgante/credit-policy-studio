@@ -1,3 +1,4 @@
+import pytest
 from fastapi.testclient import TestClient
 
 from credit_policy_studio.api import app
@@ -219,6 +220,80 @@ def test_sagemaker_invocations_route_shares_the_predict_contract() -> None:
 
     assert response.status_code == 200
     assert response.json()["predictions"][0]["processed_rows"] == 2
+
+
+@pytest.mark.parametrize("invalid_edit", ["pending", "missing", "cycle", "detached", "deleted"])
+def test_structural_edits_are_validated_and_preserve_saved_revisions(
+    tmp_path, monkeypatch, invalid_edit
+) -> None:
+    from copy import deepcopy
+    from pathlib import Path
+
+    from credit_policy_studio.engine import DecisionEngine, policy_sha256
+    from credit_policy_studio.models import CreditPolicy
+    from credit_policy_studio.warehouse import DEMO_APPLICANTS
+
+    monkeypatch.chdir(tmp_path)
+    source = Path(__file__).parents[1] / "policies" / "credit_policy_v1.json"
+    repository = LocalPolicyRepository(source)
+    active = repository.get_active()
+    payload = active.model_dump(mode="json")
+    payload["metadata"].update(version="structural-candidate", status="draft")
+    candidate = CreditPolicy.model_validate(payload)
+    repository.publish(candidate)
+    before_hash = policy_sha256(candidate)
+    old_root = payload["root_node"]
+    payload["nodes"]["new-entry"] = {
+        "id": "new-entry",
+        "type": "condition",
+        "label": "New entry",
+        "combination": "none",
+        "validations": [{"field": "score_1", "operator": "has_value", "value": True}],
+        "true_node": old_root,
+        "false_node": "reject-bureau",
+    }
+    payload["root_node"] = "new-entry"
+    url = "/api/policies/structural-candidate"
+    app.dependency_overrides[get_policy_repository] = lambda: repository
+    try:
+        client = TestClient(app)
+        assert client.put(url, json={"policy": payload}).status_code == 200
+        saved = client.get(url).json()
+        assert saved["root_node"] == "new-entry"
+        historical = client.get(url, params={"policy_sha256": before_hash}).json()
+        assert historical == candidate.model_dump(mode="json")
+        engine = DecisionEngine(CreditPolicy.model_validate(saved))
+        result = engine.evaluate(DEMO_APPLICANTS[0], "structural-check")
+        assert [step.node_id for step in result.trace][:2] == ["new-entry", old_root]
+
+        invalid = deepcopy(payload)
+        if invalid_edit == "detached":
+            invalid["root_node"] = old_root
+            # Historical reads remain compatible; new writes require every module to be reachable.
+            assert CreditPolicy.model_validate(invalid).root_node == old_root
+        elif invalid_edit == "deleted":
+            del invalid["nodes"][old_root]
+        else:
+            invalid["nodes"]["new-entry"]["true_node"] = {
+                "pending": None,
+                "missing": "nonexistent",
+                "cycle": "new-entry",
+            }[invalid_edit]
+        assert client.post("/api/policies/validate", json={"policy": invalid}).status_code == 422
+        assert client.put(url, json={"policy": invalid}).status_code == 422
+        assert client.get(url).json() == saved
+
+        # Productive policies reject valid structural modifications as well.
+        payload["metadata"] = active.metadata.model_dump(mode="json")
+        assert (
+            client.put(
+                f"/api/policies/{active.metadata.version}", json={"policy": payload}
+            ).status_code
+            == 409
+        )
+        assert repository.get_active() == active
+    finally:
+        app.dependency_overrides.clear()
 
 
 def test_configured_endpoint_is_used_instead_of_the_in_process_engine() -> None:

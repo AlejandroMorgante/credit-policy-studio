@@ -7,7 +7,7 @@ versión productiva.
 ## Conceptos básicos
 
 - **Versión candidata:** línea de trabajo guardada para evaluación. Puede actualizarse varias veces
-  sin cambiar su número. `Aplicar cambios` guarda de inmediato en la candidata seleccionada y cada
+  sin cambiar su número. `Guardar política` guarda el árbol completo en la candidata seleccionada y cada
   guardado conserva una revisión identificada por su SHA-256.
 - **Versión productiva:** versión resuelta por defecto por el endpoint cuando un consumidor no pide
   una versión concreta. Puede inspeccionarse en Política, pero no editarse.
@@ -22,7 +22,7 @@ versión productiva.
 3. Si es productiva, elegí **Crear nueva versión** e ingresá un identificador único, por ejemplo
    `2026-09-09.2`, y el responsable.
 4. Seleccioná un nodo y modificá el nombre, combinación y validaciones en el panel derecho.
-5. Elegí **Aplicar cambios**. El cambio se guarda en esa candidata; repetí el proceso en los nodos
+5. Elegí **Guardar política**. El cambio se guarda en esa candidata; repetí el proceso en los nodos
    necesarios.
 6. Elegí **Validar**. El árbol debe tener referencias válidas, campos permitidos y no contener ciclos.
 
@@ -30,7 +30,7 @@ La nueva candidata queda disponible en **Versiones** y en el selector de Evaluac
 la productiva. La cabecera muestra por separado la versión de trabajo y la versión productiva actual.
 
 Para seguir experimentando, dejá esa candidata seleccionada en **Versión de la política**. No se solicita
-otro número por cada ajuste: **Aplicar cambios** actualiza la misma versión. **Crear nueva versión**
+otro número por cada ajuste: **Guardar política** actualiza la misma versión. **Crear nueva versión**
 queda disponible para abrir otra línea de trabajo.
 
 ## Navegar árboles grandes
@@ -57,19 +57,47 @@ siguen sus conexiones. Esta distribución se recuerda por versión en tu navegad
 reglas ni se comparte con otros usuarios. **Distribuir cajas automáticamente** recupera la distribución inicial;
 **Deshacer movimiento** restaura la distribución anterior al último movimiento o reordenamiento.
 
-El pie del panel muestra **Guardado** o **Cambios sin guardar**. **Aplicar cambios** se habilita al
-modificar un campo. Si cambiás de nodo, versión o vista con cambios pendientes, podés guardarlos,
-descartarlos o seguir editando. Si falla el guardado, el formulario conserva tus cambios.
+El pie del panel muestra **Guardado** o **Borrador sin guardar**. Podés cambiar de nodo sin
+perder sus campos; **Guardar política** guarda todos los cambios juntos cuando el árbol esté
+completo. Al cambiar de versión o vista, podés guardar, descartar el borrador completo o seguir
+editando. Un guardado fallido conserva los cambios y el historial.
 
-**+ Nodo** permite insertar una condición antes de la caja seleccionada o agregar una condición o
-resultado en una de sus ramas. El diálogo muestra cómo quedarán conectados. Desde las filas **Sí** y
-**No** también podés ir al destino, cambiarlo o insertar una caja. Los destinos que generarían ciclos
-no se ofrecen; si un cambio retira nodos del recorrido, la vista previa indica cuántos.
+## Agregar módulos y conectar el árbol
 
-**Deshacer cambio** restaura el último cambio guardado en esa candidata, incluida una inserción o
-conexión. Conserva hasta 20 cambios durante la sesión de edición; abrir otra versión o recargar
-reinicia ese historial. El guardado y las modificaciones de reglas están bloqueados en la productiva
-y en Evaluación.
+**+ Nodo** permite agregar una condición o resultado sin conectar, insertarlo en una rama Sí/No,
+o insertar una condición **antes de este nodo**. Esta última opción redirige todas las entradas
+del nodo seleccionado y cambia el inicio si corresponde. La rama Sí conserva el recorrido anterior;
+para No podés elegir un destino existente, crear un resultado o dejarla pendiente.
+
+Desde las filas **Sí** y **No** del inspector podés ir al destino, cambiarlo o insertar un nodo.
+También podés pulsar **Sí → / No →** debajo de una caja y luego elegir el destino en el lienzo;
+**Cancelar conexión** o Escape cancela la operación. Los destinos que crearían ciclos no se ofrecen.
+Las decisiones finales no tienen salidas.
+
+Reconectar o insertar una decisión no elimina otros módulos: los que queden fuera del recorrido
+se conservan con borde punteado. **Usar como inicio** cambia el punto de entrada. **Eliminar módulo**
+pide confirmación, conserva los descendientes y deja pendientes las ramas que llegaban al eliminado.
+Para eliminar el inicio hay que elegir otro; siempre debe quedar al menos un módulo.
+
+La franja del borrador enumera módulos sin conectar y ramas pendientes. **Guardar política**,
+**Validar** y **Crear nueva versión** requieren un árbol completo, alcanzable desde el inicio y sin
+ciclos. La API también comprueba estas restricciones. Producción y Evaluación son de sólo lectura.
+
+### Deshacer y rehacer
+
+**Deshacer / Rehacer** recorre hasta 100 cambios del borrador: reglas, altas, eliminaciones,
+conexiones y cambio del inicio. Atajos: **⌘Z / Ctrl+Z** para deshacer y **⌘⇧Z / Ctrl+Shift+Z**
+o **Ctrl+Y** para rehacer. La escritura continua en un campo cuenta como un paso; también podés
+deshacer valores incompletos o inválidos. Una nueva edición descarta el camino de rehacer.
+
+Guardar correctamente, crear o abrir otra versión o confirmar **Descartar cambios** reinicia
+el historial. Deshacer/Rehacer no hace peticiones de guardado. Está separado de **Deshacer
+movimiento de cajas**, que sólo restaura posiciones visuales y no cambia reglas ni conexiones.
+
+El borrador y su historial viven en memoria. **Descartar cambios** recupera toda la última política
+guardada, incluidas sus conexiones. El navegador avisa antes de cerrar o recargar con cambios;
+no hay recuperación automática del borrador después de cerrar. En los diálogos, los atajos de
+edición de texto siguen siendo los propios del navegador.
 
 ## Combinar validaciones en una condición
 
@@ -95,7 +123,7 @@ las comparaciones ordinarias sobre ellos dan falso, incluso **Distinto**. Así, 
 depende de poner la validación de nulidad antes o después de la comparación numérica.
 
 **Está en la lista** acepta un arreglo JSON como umbral, por ejemplo `[600, 700, 800]`.
-**Aplicar cambios** guarda todas las validaciones juntas. La versión productiva y el laboratorio
+**Guardar política** guarda todas las validaciones juntas. La versión productiva y el laboratorio
 de evaluación muestran estos controles en modo de sólo lectura.
 
 ## Evaluar una versión

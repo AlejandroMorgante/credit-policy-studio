@@ -1,4 +1,5 @@
 import { setupEditorControls } from "./editor-controls.mjs";
+import { edges, hasNode } from "./policy-editor.mjs";
 import { positionedLayout, draggedPosition, fitViewport, NODE_WIDTH, NODE_HEIGHT } from "./tree-layout.mjs";
 
 const state = {
@@ -25,6 +26,9 @@ const state = {
   saving: false,
   loadingPolicy: false,
   editorDirty: false,
+  savedPolicy: null,
+  formBaseline: null,
+  connecting: null,
 };
 const viewportState = {
   x: 0,
@@ -152,9 +156,9 @@ function renderMinimap() {
   const group = $("#minimap-content");
   group.setAttribute("transform", `translate(${offsetX} ${offsetY}) scale(${scale})`);
   group.innerHTML = Object.values(state.policy.nodes).map((node) => {
-    const links = node.type === "condition" ? [node.true_node, node.false_node].map((child) =>
+    const links = edges(node).map(({ target }) => target).filter((child) => hasNode(state.policy, child)).map((child) =>
       `<path d="M${x[node.id] + NODE_WIDTH / 2},${y[node.id] + NODE_HEIGHT} L${x[child] + NODE_WIDTH / 2},${y[child]}"/>`
-    ).join("") : "";
+    ).join("");
     return `${links}<rect x="${x[node.id]}" y="${y[node.id]}" width="${NODE_WIDTH}" height="${NODE_HEIGHT}" rx="12" class="mini-node${node.id === state.selected ? " selected" : ""}"/>`;
   }).join("");
   updateMinimapWindow();
@@ -242,6 +246,11 @@ document.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && state.nodeDrag) {
     event.preventDefault();
     finishNodeDrag(true);
+    return;
+  }
+  if (event.key === "Escape" && state.connecting) {
+    event.preventDefault();
+    editorControls.cancelConnection();
     return;
   }
   if (state.saving || state.loadingPolicy) return;
@@ -356,14 +365,14 @@ function renderTree() {
   Object.values(state.policy.nodes).forEach((node) => {
     const button = document.createElement("button");
     const decisionClass = node.type === "decision" ? ` decision ${node.decision}` : "";
-    button.className = `tree-node${decisionClass}${state.selected === node.id ? " selected" : ""}`;
+    button.className = `tree-node${decisionClass}${state.selected === node.id ? " selected" : ""}${state.layout.connected.has(node.id) ? "" : " disconnected"}`;
     button.style.left = `${x[node.id]}px`; button.style.top = `${y[node.id]}px`;
     const count = state.mode === "impact" ? `<span class="impact-badge">${nodeCounts[node.id] || 0}</span>` : "";
     button.type = "button";
     button.dataset.nodeId = node.id;
     button.setAttribute("aria-pressed", String(state.selected === node.id));
     button.title = node.label;
-    button.innerHTML = `<span class="type"><span>${nodeTypeLabel(node)}</span>${count}</span><strong>${escapeHtml(node.label)}</strong>`;
+    button.innerHTML = `<span class="type"><span>${node.id === state.policy.root_node ? "Inicio · " : ""}${nodeTypeLabel(node)}${state.layout.connected.has(node.id) ? "" : " · Sin conectar"}</span>${count}</span><strong>${escapeHtml(node.label)}</strong>`;
     button.addEventListener("click", async () => {
       if (viewportState.dragged) return;
       if (!await requestNodeSelection(node.id)) return;
@@ -374,15 +383,29 @@ function renderTree() {
     });
     nodes.appendChild(button);
 
-    const branches = node.type === "condition" ? [node.true_node, node.false_node] : [];
-    branches.forEach((child, index) => {
-      const startX = x[node.id] + NODE_WIDTH / 2, startY = y[node.id] + NODE_HEIGHT;
+    edges(node).forEach(({ branch, target: child }, index) => {
+      if (state.mode === "edit") {
+        const port = document.createElement("button");
+        port.type = "button";
+        port.className = `branch-port${child === null ? " pending" : ""}`;
+        port.dataset.source = node.id;
+        port.dataset.branch = branch;
+        port.textContent = `${index === 0 ? "Sí" : "No"} →`;
+        port.setAttribute("aria-label", `Conectar rama ${index === 0 ? "Sí" : "No"} de ${node.label}`);
+        port.style.left = `${x[node.id] + index * NODE_WIDTH / 2}px`;
+        port.style.top = `${y[node.id] + NODE_HEIGHT + 3}px`;
+        port.addEventListener("click", () => editorControls.startConnection(node.id, branch));
+        nodes.append(port);
+      }
+      if (!hasNode(state.policy, child)) return;
+      const { startX, startY } = connectionStart(node.id, branch);
       const endX = x[child] + NODE_WIDTH / 2, endY = y[child];
       const middle = startY + (endY - startY) / 2;
       const ns = "http://www.w3.org/2000/svg";
       const path = document.createElementNS(ns, "path");
       path.dataset.source = node.id;
       path.dataset.target = child;
+      path.dataset.branch = branch;
       path.setAttribute("d", `M ${startX} ${startY} C ${startX} ${middle}, ${endX} ${middle}, ${endX} ${endY}`);
       const flowCount = pathCounts.get(`${node.id}:${child}`) || 0;
       const hasImpact = state.mode === "impact" && flowCount > 0;
@@ -410,21 +433,22 @@ function renderTree() {
         branch.setAttribute("class", "link-label");
         branch.textContent = branchLabel;
         labelGroup.append(branch, countLabel);
-      } else {
-        const label = document.createElementNS(ns, "text");
-        label.setAttribute("x", `${labelX}`);
-        label.setAttribute("y", `${labelY}`);
-        label.setAttribute("text-anchor", "middle");
-        label.setAttribute("class", "link-label");
-        label.textContent = branchLabel;
-        labelGroup.appendChild(label);
       }
       svg.appendChild(labelGroup);
     });
   });
   renderMinimap();
+  editorControls?.syncControls();
   if (!viewportState.initialized) requestAnimationFrame(fitTree);
   else applyViewportTransform();
+}
+
+function connectionStart(source, branch) {
+  const index = branch === "true_node" ? 0 : 1;
+  return {
+    startX: state.layout.x[source] + (state.mode === "edit" ? index * NODE_WIDTH / 2 + 48 : NODE_WIDTH / 2),
+    startY: state.layout.y[source] + NODE_HEIGHT + (state.mode === "edit" ? 28 : 0),
+  };
 }
 
 function paintNodeDrag() {
@@ -435,10 +459,13 @@ function paintNodeDrag() {
   state.layout.y[drag.id] = position.y;
   drag.element.style.left = `${position.x}px`;
   drag.element.style.top = `${position.y}px`;
+  $$(".branch-port").filter((port) => port.dataset.source === drag.id).forEach((port) => {
+    port.style.left = `${position.x + (port.dataset.branch === "true_node" ? 0 : NODE_WIDTH / 2)}px`;
+    port.style.top = `${position.y + NODE_HEIGHT + 3}px`;
+  });
   $$("#tree-links .tree-link").forEach((path) => {
-    const { source, target } = path.dataset;
-    const startX = state.layout.x[source] + NODE_WIDTH / 2;
-    const startY = state.layout.y[source] + NODE_HEIGHT;
+    const { source, target, branch } = path.dataset;
+    const { startX, startY } = connectionStart(source, branch);
     const endX = state.layout.x[target] + NODE_WIDTH / 2;
     const endY = state.layout.y[target];
     const middle = startY + (endY - startY) / 2;
@@ -493,8 +520,9 @@ function setupViewportInteractions() {
 
   viewport.addEventListener("pointerdown", (event) => {
     if (state.saving || state.loadingPolicy) return;
-    if (event.button !== 0 || event.target.closest(".canvas-controls, .minimap")) return;
+    if (event.button !== 0 || event.target.closest(".canvas-controls, .minimap, .branch-port")) return;
     const node = event.target.closest(".tree-node");
+    if (state.connecting && node) return;
     if (node) {
       if (state.nodeDrag || viewportState.pointers.size) return;
       event.preventDefault();
@@ -605,8 +633,12 @@ function setupViewportInteractions() {
 
 async function requestNodeSelection(id) {
   if (state.saving || state.loadingPolicy) return false;
+  if (state.connecting) {
+    editorControls.changeConnection(state.connecting.source, state.connecting.branch, id);
+    return false;
+  }
   if (id === state.selected) { setInspectorVisible(true); return true; }
-  if (!await editorControls.guard()) return false;
+  if (!editorControls.captureNodeForm()) return false;
   selectNode(id);
   return true;
 }
@@ -699,12 +731,13 @@ function readValidations() {
 
 $("#node-combination").addEventListener("change", syncEditorLock);
 $("#add-validation").addEventListener("click", () => {
+  if ($("#add-validation").disabled) return;
   addValidationRow();
   syncEditorLock();
   $("#node-validations").lastElementChild.querySelector("select").focus();
 });
 $("#node-validations").addEventListener("click", (event) => {
-  if (!event.target.closest(".remove-validation")) return;
+  if (!event.target.closest(".remove-validation") || event.target.closest(".remove-validation").disabled) return;
   event.target.closest(".validation-row").remove();
   syncEditorLock();
 });
@@ -811,7 +844,7 @@ function syncEditorLock() {
   const locked = state.mode === "impact" || isProductive || state.saving || state.loadingPolicy;
   editorControls?.syncControls();
   $$("#node-form input, #node-form select, #node-form button").forEach((control) => {
-    control.disabled = locked || Boolean(control.closest("[hidden]"));
+    control.disabled = locked || Boolean(control.closest("#condition-fields[hidden], #decision-fields[hidden]"));
   });
   const rows = $$(".validation-row");
   const combination = $("#node-combination").value;
@@ -899,7 +932,6 @@ async function loadEditorVersion(version) {
   return withPolicyLoading(async () => {
     state.policy = await api(`/api/policies/${encodeURIComponent(version)}`);
     state.editingVersion = version;
-    editorControls.resetHistory();
     state.selected = state.policy.root_node;
     state.editorDraft = structuredClone(state.policy);
     state.editorSelected = state.selected;
@@ -908,6 +940,7 @@ async function loadEditorVersion(version) {
     viewportState.initialized = false;
     renderTree();
     selectNode(state.selected);
+    editorControls.resetHistory();
     syncVersionUi();
   });
 }
@@ -963,12 +996,13 @@ async function initialize() {
 }
 
 $("#validate-button").addEventListener("click", async () => {
+  if (state.saving || state.loadingPolicy || !editorControls.readyToSave()) return;
   try { const result = await api("/api/policies/validate", { method: "POST", body: JSON.stringify({ policy: state.policy }) }); toast(`Política válida · ${result.nodes} nodos`); }
   catch (error) { toast(`No es válida: ${error.message}`, true); }
 });
 
 async function openNewVersionDialog() {
-  if (!await editorControls.guard()) return;
+  if (state.saving || state.loadingPolicy || !editorControls.readyToSave()) return;
   $("#publish-version").value = "";
   $("#publish-author").value = state.policy.metadata.created_by;
   $("#publish-dialog").showModal();
@@ -980,8 +1014,13 @@ $("#publish-button").addEventListener("click", () => {
 
 $("#publish-form").addEventListener("submit", async (event) => {
   if (event.submitter?.value === "cancel") return;
-  event.preventDefault(); const policy = structuredClone(state.policy);
+  event.preventDefault();
+  if (state.saving || state.loadingPolicy || !editorControls.readyToSave()) return;
+  const policy = structuredClone(state.policy);
   policy.metadata.version = $("#publish-version").value.trim(); policy.metadata.created_by = $("#publish-author").value.trim(); policy.metadata.created_at = new Date().toISOString(); policy.metadata.status = "draft";
+  state.saving = true;
+  $("#confirm-publish").disabled = true;
+  syncEditorLock();
   try {
     await api("/api/policies/publish", { method: "POST", body: JSON.stringify({ policy }) });
     state.policy = policy;
@@ -993,6 +1032,7 @@ $("#publish-form").addEventListener("submit", async (event) => {
     await loadVersions({ evaluationVersion: policy.metadata.version, editingVersion: policy.metadata.version });
     $("#publish-dialog").close(); renderTree(); toast(`Versión ${policy.metadata.version} creada · producción no cambió`);
   } catch (error) { toast(`No se pudo crear la versión: ${error.message}`, true); }
+  finally { state.saving = false; $("#confirm-publish").disabled = false; syncEditorLock(); }
 });
 
 async function executeEvaluation() {
@@ -1022,6 +1062,7 @@ async function setMode(mode) {
   if (state.saving || state.loadingPolicy) return false;
   if (mode === state.mode) return true;
   if (!await editorControls.guard()) return false;
+  editorControls.cancelConnection();
   if (state.mode === "edit" && mode === "impact") {
     state.editorDraft = structuredClone(state.policy);
     state.editorSelected = state.selected;
@@ -1157,6 +1198,7 @@ function registerWebMcp() {
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     annotations: { readOnlyHint: true, untrustedContentHint: false },
     async execute() {
+      if (state.saving || state.loadingPolicy || !editorControls.readyToSave()) throw new Error("El borrador tiene pendientes.");
       const result = await api("/api/policies/validate", { method: "POST", body: JSON.stringify({ policy: state.policy }) });
       toast(`Política válida · ${result.nodes} nodos`);
       return result;
@@ -1169,6 +1211,7 @@ function registerWebMcp() {
     inputSchema: { type: "object", properties: { limit: { type: "integer", minimum: 1, maximum: 10000 } }, required: ["limit"], additionalProperties: false },
     annotations: { readOnlyHint: false, untrustedContentHint: false },
     async execute({ limit }) {
+      if (!await editorControls.guard()) throw new Error("Guardá o descartá el borrador antes de evaluar.");
       const result = await api("/api/runs", { method: "POST", body: JSON.stringify({ instances: [{}], parameters: { limit, policy_version: state.policy.metadata.version } }) });
       await loadRuns(result.policy_version, result.run_id);
       toast(`${result.processed_rows} usuarios · política ${result.policy_version}`);
@@ -1179,7 +1222,7 @@ function registerWebMcp() {
 
 editorControls = setupEditorControls({
   state, api, toast, renderTree, selectNode, focusNode, syncEditorLock, syncVersionUi,
-  readValidations, fieldLabels, escapeHtml, requestNodeSelection,
+  readValidations, addValidationRow, fieldLabels, escapeHtml, requestNodeSelection,
   revealInspector: () => setInspectorVisible(true),
 });
 window.addEventListener("beforeunload", (event) => {
@@ -1187,3 +1230,6 @@ window.addEventListener("beforeunload", (event) => {
 });
 setupViewportInteractions();
 initialize().then(registerWebMcp).catch((error) => toast(`No se pudo iniciar: ${error.message}`, true));
+
+// The browser regression suite imports module state without adding window globals.
+export { state, setMode };
