@@ -115,7 +115,7 @@ That avoids the Athena query-size limit on large decision traces and any table m
 - Vertex-compatible `/health` and `/predict` routes (`instances` in, `predictions` out).
 - Mutable candidate workspaces with immutable SHA-addressed revisions and an exact productive pointer.
 - BigQuery input, per-user results, execution metadata, policy hash, and ordered decision traces.
-- A warm, dependency-free HTML/CSS/JavaScript editor and impact dashboard.
+- A clean, dependency-free HTML/CSS/JavaScript editor and impact dashboard.
 - A least-privilege Vertex runtime service account; an additional UI identity is created only if the
   optional Cloud Run deployment is enabled later.
 - Portable Terraform, a two-stage deployment Makefile, synthetic seed SQL, tests, and CI.
@@ -156,6 +156,10 @@ make run
 Open <http://localhost:8080>. Without `VERTEX_ENDPOINT_ID`, local mode uses eight in-memory fictional
 applicants. Edit a threshold, create a candidate version, open **Evaluación**, select it, run the
 dataset, and promote it only if the result is acceptable.
+
+The editor's graph, layout, and drag calculations also have dependency-free tests. With Node.js 20+
+installed, run `node --test tests/web/*.test.mjs` alongside `make test` and `make lint` before changing
+the UI. See the [user guide](docs/user-guide.md) for canvas navigation, node creation, and undo behavior.
 
 ## Disposable POC lifecycle
 

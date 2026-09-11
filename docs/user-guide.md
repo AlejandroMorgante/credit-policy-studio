@@ -18,7 +18,7 @@ versión productiva.
 ## Crear una versión
 
 1. Abrí **Política**.
-2. En **Versión a editar**, elegí la política que querés usar como base.
+2. En **Versión de la política**, elegí la política que querés usar como base.
 3. Si es productiva, elegí **Crear nueva versión** e ingresá un identificador único, por ejemplo
    `2026-09-09.2`, y el responsable.
 4. Seleccioná un nodo y modificá el nombre, combinación y validaciones en el panel derecho.
@@ -29,9 +29,47 @@ versión productiva.
 La nueva candidata queda disponible en **Versiones** y en el selector de Evaluación, pero no reemplaza
 la productiva. La cabecera muestra por separado la versión de trabajo y la versión productiva actual.
 
-Para seguir experimentando, dejá esa candidata seleccionada en **Versión a editar**. No se solicita
+Para seguir experimentando, dejá esa candidata seleccionada en **Versión de la política**. No se solicita
 otro número por cada ajuste: **Aplicar cambios** actualiza la misma versión. **Crear nueva versión**
 queda disponible para abrir otra línea de trabajo.
+
+## Navegar árboles grandes
+
+- **Modo enfoque**, en la esquina superior derecha del lienzo, amplía el árbol a toda la ventana
+  y oculta la navegación. Conserva la versión visible y permite abrir los detalles al elegir un
+  nodo. **Salir** o **Escape** restaura la vista de trabajo.
+- La lupa del lienzo o **⌘K / Ctrl+K** abre la búsqueda por nombre, variable o tipo de nodo.
+  Elegir un resultado abre sus detalles y lo centra a tamaño legible.
+- El **minimapa** muestra la ubicación de la vista y el nodo seleccionado. Hacé clic para moverte
+  a otra parte del árbol.
+- **Encuadrar árbol completo** muestra todos los nodos, incluso en políticas grandes.
+  **Centrar nodo seleccionado** vuelve al nodo que estás inspeccionando.
+- Los botones **− / +** cambian el zoom; el porcentaje lo restablece al **100%**.
+- Arrastrá el fondo para moverte. Con el foco en el lienzo, también podés usar las flechas,
+  **+ / −**, **0** para encuadrar y **F** para centrar la selección.
+- El botón de panel en la esquina superior derecha permite ocultar los detalles y ampliar el
+  lienzo. Seleccionar un nodo vuelve a abrir sus detalles.
+
+## Ordenar y editar cajas
+
+Hacé clic en una caja para ver sus detalles; mantené el clic y arrastrá para reubicarla. Las líneas
+siguen sus conexiones. Esta distribución se recuerda por versión en tu navegador y no cambia las
+reglas ni se comparte con otros usuarios. **Distribuir cajas automáticamente** recupera la distribución inicial;
+**Deshacer movimiento** restaura la distribución anterior al último movimiento o reordenamiento.
+
+El pie del panel muestra **Guardado** o **Cambios sin guardar**. **Aplicar cambios** se habilita al
+modificar un campo. Si cambiás de nodo, versión o vista con cambios pendientes, podés guardarlos,
+descartarlos o seguir editando. Si falla el guardado, el formulario conserva tus cambios.
+
+**+ Nodo** permite insertar una condición antes de la caja seleccionada o agregar una condición o
+resultado en una de sus ramas. El diálogo muestra cómo quedarán conectados. Desde las filas **Sí** y
+**No** también podés ir al destino, cambiarlo o insertar una caja. Los destinos que generarían ciclos
+no se ofrecen; si un cambio retira nodos del recorrido, la vista previa indica cuántos.
+
+**Deshacer cambio** restaura el último cambio guardado en esa candidata, incluida una inserción o
+conexión. Conserva hasta 20 cambios durante la sesión de edición; abrir otra versión o recargar
+reinicia ese historial. El guardado y las modificaciones de reglas están bloqueados en la productiva
+y en Evaluación.
 
 ## Combinar validaciones en una condición
 
@@ -101,7 +139,7 @@ históricas.
 - **Corrida visible** enumera las corridas de la versión seleccionada y permite inspeccionarlas una a
   la vez.
 - **Editar** abre una candidata en Política. **Ver** abre la productiva en modo de sólo lectura.
-- Cambiar la versión evaluada no cambia la **Versión a editar**. Al volver a Política, el editor
+- Cambiar la versión evaluada no cambia la **Versión de la política** del editor. Al volver a Política, el editor
   restaura esa versión y el nodo seleccionado.
 
 ## Qué sucede en Google Cloud
