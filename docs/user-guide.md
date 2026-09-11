@@ -21,7 +21,7 @@ versión productiva.
 2. En **Versión a editar**, elegí la política que querés usar como base.
 3. Si es productiva, elegí **Crear nueva versión** e ingresá un identificador único, por ejemplo
    `2026-09-09.2`, y el responsable.
-4. Seleccioná un nodo y modificá el nombre, variable, operador o umbral en el panel derecho.
+4. Seleccioná un nodo y modificá el nombre, combinación y validaciones en el panel derecho.
 5. Elegí **Aplicar cambios**. El cambio se guarda en esa candidata; repetí el proceso en los nodos
    necesarios.
 6. Elegí **Validar**. El árbol debe tener referencias válidas, campos permitidos y no contener ciclos.
@@ -32,6 +32,33 @@ la productiva. La cabecera muestra por separado la versión de trabajo y la vers
 Para seguir experimentando, dejá esa candidata seleccionada en **Versión a editar**. No se solicita
 otro número por cada ajuste: **Aplicar cambios** actualiza la misma versión. **Crear nueva versión**
 queda disponible para abrir otra línea de trabajo.
+
+## Combinar validaciones en una condición
+
+Cada condición tiene un **Nombre visible** y un **Tipo de combinación**:
+
+- **Sin combinación:** exactamente una validación; no permite agregar otra.
+- **AND:** la rama Sí se toma cuando se cumplen todas las validaciones.
+- **OR:** la rama Sí se toma cuando se cumple al menos una validación.
+
+Cada validación tiene variable, operador, umbral y **Eliminar validación**. Usá
+**+ Agregar validación** para sumar reglas con la combinación elegida. Siempre debe quedar al menos
+una validación. Para volver a **Sin combinación**, eliminá las adicionales primero.
+
+Los operadores **Es nulo** y **Tiene valor** usan un umbral **Sí / No**. Por ejemplo, para exigir
+que exista un score de buró y que sea mayor a 650, seleccioná **AND** y configurá:
+
+1. Score de buró · Tiene valor · Sí.
+2. Score de buró · Mayor que · 650.
+
+**Es nulo · No** equivale a **Tiene valor · Sí**, y **Tiene valor · No** equivale a
+**Es nulo · Sí**. Cero es un valor presente. Los datos ausentes o `null` se consideran nulos;
+las comparaciones ordinarias sobre ellos dan falso, incluso **Distinto**. Así, el resultado no
+depende de poner la validación de nulidad antes o después de la comparación numérica.
+
+**Está en la lista** acepta un arreglo JSON como umbral, por ejemplo `[600, 700, 800]`.
+**Aplicar cambios** guarda todas las validaciones juntas. La versión productiva y el laboratorio
+de evaluación muestran estos controles en modo de sólo lectura.
 
 ## Evaluar una versión
 

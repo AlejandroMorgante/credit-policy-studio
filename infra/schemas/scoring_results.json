@@ -11,10 +11,10 @@
   {"name":"leaf_node_id","type":"STRING","mode":"REQUIRED"},
   {"name":"trace_json","type":"STRING","mode":"REQUIRED","description":"Ordered decision path as JSON."},
   {"name":"evaluated_at","type":"TIMESTAMP","mode":"REQUIRED"},
-  {"name":"score_1","type":"FLOAT","mode":"REQUIRED"},
-  {"name":"score_2","type":"FLOAT","mode":"REQUIRED"},
-  {"name":"score_3","type":"FLOAT","mode":"REQUIRED"},
-  {"name":"variable_1","type":"FLOAT","mode":"REQUIRED"},
-  {"name":"variable_2","type":"FLOAT","mode":"REQUIRED"},
-  {"name":"variable_3","type":"FLOAT","mode":"REQUIRED"}
+  {"name":"score_1","type":"FLOAT","mode":"NULLABLE"},
+  {"name":"score_2","type":"FLOAT","mode":"NULLABLE"},
+  {"name":"score_3","type":"FLOAT","mode":"NULLABLE"},
+  {"name":"variable_1","type":"FLOAT","mode":"NULLABLE"},
+  {"name":"variable_2","type":"FLOAT","mode":"NULLABLE"},
+  {"name":"variable_3","type":"FLOAT","mode":"NULLABLE"}
 ]

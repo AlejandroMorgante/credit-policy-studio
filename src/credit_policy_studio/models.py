@@ -5,7 +5,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-Operator = Literal["lt", "lte", "gt", "gte", "eq", "neq", "in"]
+Operator = Literal["lt", "lte", "gt", "gte", "eq", "neq", "in", "is_null", "has_value"]
+Combination = Literal["AND", "OR", "none"]
 
 
 class PolicyMetadata(BaseModel):
@@ -18,17 +19,43 @@ class PolicyMetadata(BaseModel):
     status: Literal["draft", "active", "retired"] = "draft"
 
 
-class ConditionNode(BaseModel):
+class ConditionValidation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    field: str
+    operator: Operator
+    value: Any
+
+    @model_validator(mode="after")
+    def validate_threshold(self) -> ConditionValidation:
+        if self.operator in ("is_null", "has_value") and type(self.value) is not bool:
+            raise ValueError("Null operators require a boolean threshold (true or false)")
+        return self
+
+
+class ConditionBranches(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     id: str
     type: Literal["condition"]
     label: str
-    field: str
-    operator: Operator
-    value: Any
     true_node: str
     false_node: str
+
+
+class ConditionNode(ConditionBranches, ConditionValidation):
+    """Legacy single validation; keep its serialized shape and policy hash stable."""
+
+
+class CombinedConditionNode(ConditionBranches):
+    combination: Combination
+    validations: list[ConditionValidation] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_combination(self) -> CombinedConditionNode:
+        if self.combination == "none" and len(self.validations) != 1:
+            raise ValueError("Without combination, a condition must have exactly one validation")
+        return self
 
 
 class DecisionNode(BaseModel):
@@ -43,7 +70,7 @@ class DecisionNode(BaseModel):
     reason_code: str
 
 
-Node = ConditionNode | DecisionNode
+Node = ConditionNode | CombinedConditionNode | DecisionNode
 
 
 class CreditPolicy(BaseModel):
@@ -59,7 +86,7 @@ class CreditPolicy(BaseModel):
         for key, node in self.nodes.items():
             if key != node.id:
                 raise ValueError(f"node key {key!r} does not match id {node.id!r}")
-            if isinstance(node, ConditionNode):
+            if isinstance(node, ConditionBranches):
                 for target in (node.true_node, node.false_node):
                     if target not in self.nodes:
                         raise ValueError(f"node {node.id!r} references missing node {target!r}")
@@ -77,7 +104,7 @@ class CreditPolicy(BaseModel):
                 return
             visiting.add(node_id)
             node = self.nodes[node_id]
-            if isinstance(node, ConditionNode):
+            if isinstance(node, ConditionBranches):
                 visit(node.true_node)
                 visit(node.false_node)
             visiting.remove(node_id)
@@ -88,28 +115,40 @@ class CreditPolicy(BaseModel):
 
 class Applicant(BaseModel):
     user_id: str
-    score_1: float
-    score_2: float
-    score_3: float
-    variable_1: float
-    variable_2: float
-    variable_3: float
+    score_1: float | None = None
+    score_2: float | None = None
+    score_3: float | None = None
+    variable_1: float | None = None
+    variable_2: float | None = None
+    variable_3: float | None = None
 
 
-class TraceStep(BaseModel):
-    node_id: str
-    label: str
+class ValidationTrace(BaseModel):
     field: str
     operator: Operator
     threshold: Any
     observed: Any
     branch: bool
+
+
+class NodeTrace(BaseModel):
+    node_id: str
+    label: str
+    branch: bool
     next_node: str
 
 
-class ScoringResult(BaseModel):
+class TraceStep(NodeTrace, ValidationTrace):
+    """The original single-validation trace format."""
+
+
+class CombinedTraceStep(NodeTrace):
+    combination: Combination
+    validations: list[ValidationTrace]
+
+
+class ScoringResult(Applicant):
     run_id: str
-    user_id: str
     policy_id: str
     policy_version: str
     policy_sha256: str
@@ -118,14 +157,8 @@ class ScoringResult(BaseModel):
     credit_limit: float
     reason_code: str
     leaf_node_id: str
-    trace: list[TraceStep]
+    trace: list[TraceStep | CombinedTraceStep]
     evaluated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
-    score_1: float
-    score_2: float
-    score_3: float
-    variable_1: float
-    variable_2: float
-    variable_3: float
 
 
 class PredictionParameters(BaseModel):

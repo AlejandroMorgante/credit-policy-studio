@@ -281,12 +281,90 @@ function selectNode(id) {
   const condition = node.type === "condition";
   $("#condition-fields").hidden = !condition; $("#decision-fields").hidden = condition;
   if (condition) {
-    $("#node-field").value = node.field; $("#node-operator").value = node.operator; $("#node-value").value = node.value;
+    $("#node-combination").value = node.combination || "none";
+    $("#node-validations").replaceChildren();
+    (node.validations || [node]).forEach(addValidationRow);
   } else {
     $("#node-decision").value = node.decision; $("#node-band").value = node.risk_band; $("#node-limit").value = node.credit_limit;
   }
   renderTree();
+  syncEditorLock();
 }
+
+function renderValidationThreshold(row, value) {
+  const operator = row.querySelector("[data-validation-operator]").value;
+  const isNullCheck = ["is_null", "has_value"].includes(operator);
+  const control = document.createElement(isNullCheck ? "select" : "input");
+  control.dataset.validationValue = "";
+  control.required = true;
+  if (isNullCheck) {
+    control.add(new Option("Sí", "true"));
+    control.add(new Option("No", "false"));
+    control.value = String(typeof value === "boolean" ? value : true);
+  } else {
+    control.type = operator === "in" ? "text" : "number";
+    if (operator === "in") {
+      control.placeholder = "[600, 700, 800]";
+      control.value = Array.isArray(value) ? JSON.stringify(value) : "";
+      control.addEventListener("input", () => control.setCustomValidity(""));
+    } else {
+      control.step = "any";
+      control.value = typeof value === "number" ? value : "";
+    }
+  }
+  row.querySelector("[data-validation-value]").replaceWith(control);
+}
+
+function addValidationRow(validation = { field: "score_1", operator: "gte", value: 0 }) {
+  const row = $("#validation-template").content.firstElementChild.cloneNode(true);
+  const field = row.querySelector("[data-validation-field]");
+  Object.entries(fieldLabels).forEach(([value, label]) => field.add(new Option(label, value)));
+  field.value = validation.field;
+  row.querySelector("[data-validation-operator]").value = validation.operator;
+  renderValidationThreshold(row, validation.value);
+  $("#node-validations").append(row);
+}
+
+function readValidations() {
+  return $$(".validation-row").map((row) => {
+    const field = row.querySelector("[data-validation-field]").value;
+    const operator = row.querySelector("[data-validation-operator]").value;
+    const control = row.querySelector("[data-validation-value]");
+    let value;
+    if (["is_null", "has_value"].includes(operator)) value = control.value === "true";
+    else if (operator === "in") {
+      try {
+        value = JSON.parse(control.value);
+        if (!Array.isArray(value)) throw new Error("Expected an array");
+      } catch {
+        control.setCustomValidity("Ingresá una lista JSON, por ejemplo [600, 700, 800].");
+        control.reportValidity();
+        throw new Error("El umbral debe ser una lista JSON válida");
+      }
+    } else value = Number(control.value);
+    return { field, operator, value };
+  });
+}
+
+$("#node-combination").addEventListener("change", syncEditorLock);
+$("#add-validation").addEventListener("click", () => {
+  addValidationRow();
+  syncEditorLock();
+  $("#node-validations").lastElementChild.querySelector("select").focus();
+});
+$("#node-validations").addEventListener("click", (event) => {
+  if (!event.target.closest(".remove-validation")) return;
+  event.target.closest(".validation-row").remove();
+  syncEditorLock();
+});
+$("#node-validations").addEventListener("change", (event) => {
+  if (!event.target.matches("[data-validation-operator]")) return;
+  const row = event.target.closest(".validation-row");
+  const previous = row.querySelector("[data-validation-value]");
+  const value = previous.type === "number" && previous.value !== "" ? Number(previous.value) : undefined;
+  renderValidationThreshold(row, value);
+  syncEditorLock();
+});
 
 function updateMetrics(data) {
   const total = data.total || 0;
@@ -381,8 +459,19 @@ function syncEditorLock() {
   const isProductive = state.editingVersion === state.activeVersion;
   const locked = state.mode === "impact" || isProductive;
   $$("#node-form input, #node-form select, #node-form button").forEach((control) => {
-    control.disabled = locked;
+    control.disabled = locked || Boolean(control.closest("[hidden]"));
   });
+  const rows = $$(".validation-row");
+  const combination = $("#node-combination").value;
+  $("#add-validation").disabled = locked || combination === "none";
+  rows.forEach((row, index) => {
+    row.querySelector("legend").textContent = `Validación ${index + 1}`;
+    row.querySelector(".remove-validation").disabled = locked || rows.length === 1;
+  });
+  $('#node-combination option[value="none"]').disabled = rows.length > 1;
+  $("#combination-help").textContent = combination === "none"
+    ? "Una sola validación. Elegí AND u OR para agregar más."
+    : `${combination === "AND" ? "Deben cumplirse todas las validaciones." : "Debe cumplirse al menos una validación."} Para usar Sin combinación, dejá una sola validación.`;
   const kind = $("#editor-version-kind");
   const guidance = $("#editor-guidance");
   if (!kind || !guidance) return;
@@ -483,8 +572,6 @@ async function loadRuns(version = state.policy?.metadata.version, preferredRunId
 }
 
 async function initialize() {
-  const options = Object.entries(fieldLabels).map(([value, label]) => `<option value="${value}">${label}</option>`).join("");
-  $("#node-field").innerHTML = options;
   state.policy = await api("/api/policy");
   await loadVersions({ evaluationVersion: state.policy.metadata.version });
   await loadEditorVersion(state.editingVersion);
@@ -500,7 +587,14 @@ $("#node-form").addEventListener("submit", async (event) => {
   }
   const policy = structuredClone(state.policy);
   const node = policy.nodes[state.selected]; node.label = $("#node-label").value.trim();
-  if (node.type === "condition") { node.field = $("#node-field").value; node.operator = $("#node-operator").value; node.value = Number($("#node-value").value); }
+  if (node.type === "condition") {
+    try { node.validations = readValidations(); }
+    catch (error) { toast(error.message, true); return; }
+    node.combination = $("#node-combination").value;
+    delete node.field;
+    delete node.operator;
+    delete node.value;
+  }
   else { node.decision = $("#node-decision").value; node.risk_band = $("#node-band").value; node.credit_limit = Number($("#node-limit").value); }
   const button = $(".apply-button");
   button.disabled = true;

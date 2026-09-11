@@ -91,11 +91,10 @@
               <form id="node-form">
                 <label>Nombre visible<input id="node-label" name="label" /></label>
                 <div id="condition-fields">
-                  <label>Variable<select id="node-field"></select></label>
-                  <div class="field-row">
-                    <label>Operador<select id="node-operator"><option value="gte">Mayor o igual (≥)</option><option value="gt">Mayor que (&gt;)</option><option value="lte">Menor o igual (≤)</option><option value="lt">Menor que (&lt;)</option><option value="eq">Igual (=)</option><option value="neq">Distinto (≠)</option></select></label>
-                    <label>Umbral<input id="node-value" type="number" step="any" /></label>
-                  </div>
+                  <label>Tipo de combinación<select id="node-combination" aria-describedby="combination-help"><option value="none">Sin combinación</option><option value="AND">AND</option><option value="OR">OR</option></select></label>
+                  <p class="field-help" id="combination-help"></p>
+                  <div id="node-validations"></div>
+                  <button class="button secondary full" id="add-validation" type="button">+ Agregar validación</button>
                 </div>
                 <div id="decision-fields" hidden>
                   <label>Decisión<select id="node-decision"><option>APPROVED</option><option>REVIEW</option><option>REJECTED</option></select></label>
@@ -103,6 +102,15 @@
                 </div>
                 <button class="button full apply-button" type="submit">Aplicar cambios</button>
               </form>
+              <template id="validation-template">
+                <fieldset class="validation-row">
+                  <legend>Validación</legend>
+                  <label>Variable<select data-validation-field required></select></label>
+                  <label>Operador<select data-validation-operator><option value="gte">Mayor o igual (≥)</option><option value="gt">Mayor que (&gt;)</option><option value="lte">Menor o igual (≤)</option><option value="lt">Menor que (&lt;)</option><option value="eq">Igual (=)</option><option value="neq">Distinto (≠)</option><option value="in">Está en la lista</option><option value="is_null">Es nulo</option><option value="has_value">Tiene valor</option></select></label>
+                  <label>Umbral<input data-validation-value type="number" step="any" required /></label>
+                  <button class="button secondary remove-validation" type="button">Eliminar validación</button>
+                </fieldset>
+              </template>
               <div class="run-panel">
                 <div><span class="panel-kicker">PRUEBA CONTROLADA</span><strong>Ejecutar evaluación</strong><p>Procesa el dataset con la versión seleccionada.</p><small class="run-context" id="run-context">Sin ejecución seleccionada</small></div>
                 <label>Corrida visible<select id="run-select" aria-label="Corrida visible"><option value="">Sin corridas</option></select></label>

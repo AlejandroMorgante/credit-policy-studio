@@ -1,0 +1,769 @@
+{
+  "schema_version": "1.0",
+  "metadata": {
+    "policy_id": "consumer-credit-poc",
+    "version": "sql-demo-2026-09-10.1",
+    "name": "Cascada SQL adaptada",
+    "description": "Adaptación de sql/example_policy.sql a las seis variables de la demo y a nodos condition/decision. Score de comportamiento prioritario, buró alternativo, antigüedad laboral como aproximación de población y oferta conservadora por tramos. Ver docs/sql-demo-policy.md para diferencias con el SQL.",
+    "created_at": "2026-09-10T23:18:00Z",
+    "created_by": "local-demo",
+    "status": "draft"
+  },
+  "root_node": "minimum-income",
+  "nodes": {
+    "minimum-income": {
+      "id": "minimum-income",
+      "type": "condition",
+      "label": "Ingreso presente y ≥ 1.000",
+      "combination": "AND",
+      "validations": [
+        {
+          "field": "variable_1",
+          "operator": "has_value",
+          "value": true
+        },
+        {
+          "field": "variable_1",
+          "operator": "gte",
+          "value": 1000
+        }
+      ],
+      "true_node": "score-available",
+      "false_node": "reject-income"
+    },
+    "score-available": {
+      "id": "score-available",
+      "type": "condition",
+      "label": "Comportamiento o buró disponible",
+      "combination": "OR",
+      "validations": [
+        {
+          "field": "score_3",
+          "operator": "has_value",
+          "value": true
+        },
+        {
+          "field": "score_1",
+          "operator": "has_value",
+          "value": true
+        }
+      ],
+      "true_node": "prefer-behavior",
+      "false_node": "reject-score"
+    },
+    "prefer-behavior": {
+      "id": "prefer-behavior",
+      "type": "condition",
+      "label": "Priorizar comportamiento",
+      "combination": "none",
+      "validations": [
+        {
+          "field": "score_3",
+          "operator": "has_value",
+          "value": true
+        }
+      ],
+      "true_node": "behavior-low",
+      "false_node": "bureau-low"
+    },
+    "behavior-low": {
+      "id": "behavior-low",
+      "type": "condition",
+      "label": "Comportamiento > 80",
+      "combination": "none",
+      "validations": [
+        {
+          "field": "score_3",
+          "operator": "gt",
+          "value": 80
+        }
+      ],
+      "true_node": "low-long-tenure",
+      "false_node": "behavior-medium-low"
+    },
+    "behavior-medium-low": {
+      "id": "behavior-medium-low",
+      "type": "condition",
+      "label": "Comportamiento > 60",
+      "combination": "none",
+      "validations": [
+        {
+          "field": "score_3",
+          "operator": "gt",
+          "value": 60
+        }
+      ],
+      "true_node": "medium-established",
+      "false_node": "behavior-medium-high"
+    },
+    "behavior-medium-high": {
+      "id": "behavior-medium-high",
+      "type": "condition",
+      "label": "Comportamiento > 35",
+      "combination": "none",
+      "validations": [
+        {
+          "field": "score_3",
+          "operator": "gt",
+          "value": 35
+        }
+      ],
+      "true_node": "d-income-cap",
+      "false_node": "manual-review"
+    },
+    "bureau-low": {
+      "id": "bureau-low",
+      "type": "condition",
+      "label": "Buró > 740",
+      "combination": "none",
+      "validations": [
+        {
+          "field": "score_1",
+          "operator": "gt",
+          "value": 740
+        }
+      ],
+      "true_node": "low-long-tenure",
+      "false_node": "bureau-medium-low"
+    },
+    "bureau-medium-low": {
+      "id": "bureau-medium-low",
+      "type": "condition",
+      "label": "Buró > 630",
+      "combination": "none",
+      "validations": [
+        {
+          "field": "score_1",
+          "operator": "gt",
+          "value": 630
+        }
+      ],
+      "true_node": "medium-established",
+      "false_node": "bureau-medium-high"
+    },
+    "bureau-medium-high": {
+      "id": "bureau-medium-high",
+      "type": "condition",
+      "label": "Buró > 492.5",
+      "combination": "none",
+      "validations": [
+        {
+          "field": "score_1",
+          "operator": "gt",
+          "value": 492.5
+        }
+      ],
+      "true_node": "d-income-cap",
+      "false_node": "manual-review"
+    },
+    "low-long-tenure": {
+      "id": "low-long-tenure",
+      "type": "condition",
+      "label": "Riesgo bajo · antigüedad ≥ 24",
+      "combination": "none",
+      "validations": [
+        {
+          "field": "variable_3",
+          "operator": "gte",
+          "value": 24
+        }
+      ],
+      "true_node": "a-income-cap",
+      "false_node": "low-established"
+    },
+    "low-established": {
+      "id": "low-established",
+      "type": "condition",
+      "label": "Riesgo bajo · antigüedad ≥ 4",
+      "combination": "none",
+      "validations": [
+        {
+          "field": "variable_3",
+          "operator": "gte",
+          "value": 4
+        }
+      ],
+      "true_node": "b-income-cap",
+      "false_node": "c-income-cap"
+    },
+    "medium-established": {
+      "id": "medium-established",
+      "type": "condition",
+      "label": "Riesgo medio bajo · antigüedad ≥ 4",
+      "combination": "none",
+      "validations": [
+        {
+          "field": "variable_3",
+          "operator": "gte",
+          "value": 4
+        }
+      ],
+      "true_node": "b-income-cap",
+      "false_node": "manual-review"
+    },
+    "a-income-cap": {
+      "id": "a-income-cap",
+      "type": "condition",
+      "label": "A · ingreso ≥ 6250",
+      "combination": "none",
+      "validations": [
+        {
+          "field": "variable_1",
+          "operator": "gte",
+          "value": 6250
+        }
+      ],
+      "true_node": "a-capacity-cap",
+      "false_node": "a-income-mid"
+    },
+    "a-income-mid": {
+      "id": "a-income-mid",
+      "type": "condition",
+      "label": "A · ingreso ≥ 3.000",
+      "combination": "none",
+      "validations": [
+        {
+          "field": "variable_1",
+          "operator": "gte",
+          "value": 3000
+        }
+      ],
+      "true_node": "a-capacity-mid",
+      "false_node": "a-capacity-base"
+    },
+    "a-capacity-cap": {
+      "id": "a-capacity-cap",
+      "type": "condition",
+      "label": "A · deuda entre 0 y 2186",
+      "combination": "AND",
+      "validations": [
+        {
+          "field": "variable_2",
+          "operator": "has_value",
+          "value": true
+        },
+        {
+          "field": "variable_2",
+          "operator": "gte",
+          "value": 0
+        },
+        {
+          "field": "variable_2",
+          "operator": "lte",
+          "value": 2186
+        }
+      ],
+      "true_node": "approve-a-cap",
+      "false_node": "reject-capacity"
+    },
+    "approve-a-cap": {
+      "id": "approve-a-cap",
+      "type": "decision",
+      "label": "Cluster A · límite 25.000",
+      "decision": "APPROVED",
+      "risk_band": "A",
+      "credit_limit": 25000,
+      "reason_code": "DEMO_CLUSTER_A_CAP"
+    },
+    "a-capacity-mid": {
+      "id": "a-capacity-mid",
+      "type": "condition",
+      "label": "A · deuda entre 0 y 1049",
+      "combination": "AND",
+      "validations": [
+        {
+          "field": "variable_2",
+          "operator": "has_value",
+          "value": true
+        },
+        {
+          "field": "variable_2",
+          "operator": "gte",
+          "value": 0
+        },
+        {
+          "field": "variable_2",
+          "operator": "lte",
+          "value": 1049
+        }
+      ],
+      "true_node": "approve-a-mid",
+      "false_node": "reject-capacity"
+    },
+    "approve-a-mid": {
+      "id": "approve-a-mid",
+      "type": "decision",
+      "label": "Cluster A · límite 12.000",
+      "decision": "APPROVED",
+      "risk_band": "A",
+      "credit_limit": 12000,
+      "reason_code": "DEMO_CLUSTER_A_MID"
+    },
+    "a-capacity-base": {
+      "id": "a-capacity-base",
+      "type": "condition",
+      "label": "A · deuda entre 0 y 349",
+      "combination": "AND",
+      "validations": [
+        {
+          "field": "variable_2",
+          "operator": "has_value",
+          "value": true
+        },
+        {
+          "field": "variable_2",
+          "operator": "gte",
+          "value": 0
+        },
+        {
+          "field": "variable_2",
+          "operator": "lte",
+          "value": 349
+        }
+      ],
+      "true_node": "approve-a-base",
+      "false_node": "reject-capacity"
+    },
+    "approve-a-base": {
+      "id": "approve-a-base",
+      "type": "decision",
+      "label": "Cluster A · límite 4.000",
+      "decision": "APPROVED",
+      "risk_band": "A",
+      "credit_limit": 4000,
+      "reason_code": "DEMO_CLUSTER_A_BASE"
+    },
+    "b-income-cap": {
+      "id": "b-income-cap",
+      "type": "condition",
+      "label": "B · ingreso ≥ 6000",
+      "combination": "none",
+      "validations": [
+        {
+          "field": "variable_1",
+          "operator": "gte",
+          "value": 6000
+        }
+      ],
+      "true_node": "b-capacity-cap",
+      "false_node": "b-income-mid"
+    },
+    "b-income-mid": {
+      "id": "b-income-mid",
+      "type": "condition",
+      "label": "B · ingreso ≥ 3.000",
+      "combination": "none",
+      "validations": [
+        {
+          "field": "variable_1",
+          "operator": "gte",
+          "value": 3000
+        }
+      ],
+      "true_node": "b-capacity-mid",
+      "false_node": "b-capacity-base"
+    },
+    "b-capacity-cap": {
+      "id": "b-capacity-cap",
+      "type": "condition",
+      "label": "B · deuda entre 0 y 1679",
+      "combination": "AND",
+      "validations": [
+        {
+          "field": "variable_2",
+          "operator": "has_value",
+          "value": true
+        },
+        {
+          "field": "variable_2",
+          "operator": "gte",
+          "value": 0
+        },
+        {
+          "field": "variable_2",
+          "operator": "lte",
+          "value": 1679
+        }
+      ],
+      "true_node": "approve-b-cap",
+      "false_node": "reject-capacity"
+    },
+    "approve-b-cap": {
+      "id": "approve-b-cap",
+      "type": "decision",
+      "label": "Cluster B · límite 18.000",
+      "decision": "APPROVED",
+      "risk_band": "B",
+      "credit_limit": 18000,
+      "reason_code": "DEMO_CLUSTER_B_CAP"
+    },
+    "b-capacity-mid": {
+      "id": "b-capacity-mid",
+      "type": "condition",
+      "label": "B · deuda entre 0 y 839",
+      "combination": "AND",
+      "validations": [
+        {
+          "field": "variable_2",
+          "operator": "has_value",
+          "value": true
+        },
+        {
+          "field": "variable_2",
+          "operator": "gte",
+          "value": 0
+        },
+        {
+          "field": "variable_2",
+          "operator": "lte",
+          "value": 839
+        }
+      ],
+      "true_node": "approve-b-mid",
+      "false_node": "reject-capacity"
+    },
+    "approve-b-mid": {
+      "id": "approve-b-mid",
+      "type": "decision",
+      "label": "Cluster B · límite 9.000",
+      "decision": "APPROVED",
+      "risk_band": "B",
+      "credit_limit": 9000,
+      "reason_code": "DEMO_CLUSTER_B_MID"
+    },
+    "b-capacity-base": {
+      "id": "b-capacity-base",
+      "type": "condition",
+      "label": "B · deuda entre 0 y 279",
+      "combination": "AND",
+      "validations": [
+        {
+          "field": "variable_2",
+          "operator": "has_value",
+          "value": true
+        },
+        {
+          "field": "variable_2",
+          "operator": "gte",
+          "value": 0
+        },
+        {
+          "field": "variable_2",
+          "operator": "lte",
+          "value": 279
+        }
+      ],
+      "true_node": "approve-b-base",
+      "false_node": "reject-capacity"
+    },
+    "approve-b-base": {
+      "id": "approve-b-base",
+      "type": "decision",
+      "label": "Cluster B · límite 3.000",
+      "decision": "APPROVED",
+      "risk_band": "B",
+      "credit_limit": 3000,
+      "reason_code": "DEMO_CLUSTER_B_BASE"
+    },
+    "c-income-cap": {
+      "id": "c-income-cap",
+      "type": "condition",
+      "label": "C · ingreso ≥ 5333.34",
+      "combination": "none",
+      "validations": [
+        {
+          "field": "variable_1",
+          "operator": "gte",
+          "value": 5333.34
+        }
+      ],
+      "true_node": "c-capacity-cap",
+      "false_node": "c-income-mid"
+    },
+    "c-income-mid": {
+      "id": "c-income-mid",
+      "type": "condition",
+      "label": "C · ingreso ≥ 3.000",
+      "combination": "none",
+      "validations": [
+        {
+          "field": "variable_1",
+          "operator": "gte",
+          "value": 3000
+        }
+      ],
+      "true_node": "c-capacity-mid",
+      "false_node": "c-capacity-base"
+    },
+    "c-capacity-cap": {
+      "id": "c-capacity-cap",
+      "type": "condition",
+      "label": "C · deuda entre 0 y 1065",
+      "combination": "AND",
+      "validations": [
+        {
+          "field": "variable_2",
+          "operator": "has_value",
+          "value": true
+        },
+        {
+          "field": "variable_2",
+          "operator": "gte",
+          "value": 0
+        },
+        {
+          "field": "variable_2",
+          "operator": "lte",
+          "value": 1065
+        }
+      ],
+      "true_node": "approve-c-cap",
+      "false_node": "reject-capacity"
+    },
+    "approve-c-cap": {
+      "id": "approve-c-cap",
+      "type": "decision",
+      "label": "Cluster C · límite 8.000",
+      "decision": "APPROVED",
+      "risk_band": "C",
+      "credit_limit": 8000,
+      "reason_code": "DEMO_CLUSTER_C_CAP"
+    },
+    "c-capacity-mid": {
+      "id": "c-capacity-mid",
+      "type": "condition",
+      "label": "C · deuda entre 0 y 599",
+      "combination": "AND",
+      "validations": [
+        {
+          "field": "variable_2",
+          "operator": "has_value",
+          "value": true
+        },
+        {
+          "field": "variable_2",
+          "operator": "gte",
+          "value": 0
+        },
+        {
+          "field": "variable_2",
+          "operator": "lte",
+          "value": 599
+        }
+      ],
+      "true_node": "approve-c-mid",
+      "false_node": "reject-capacity"
+    },
+    "approve-c-mid": {
+      "id": "approve-c-mid",
+      "type": "decision",
+      "label": "Cluster C · límite 4.500",
+      "decision": "APPROVED",
+      "risk_band": "C",
+      "credit_limit": 4500,
+      "reason_code": "DEMO_CLUSTER_C_MID"
+    },
+    "c-capacity-base": {
+      "id": "c-capacity-base",
+      "type": "condition",
+      "label": "C · deuda entre 0 y 199",
+      "combination": "AND",
+      "validations": [
+        {
+          "field": "variable_2",
+          "operator": "has_value",
+          "value": true
+        },
+        {
+          "field": "variable_2",
+          "operator": "gte",
+          "value": 0
+        },
+        {
+          "field": "variable_2",
+          "operator": "lte",
+          "value": 199
+        }
+      ],
+      "true_node": "approve-c-base",
+      "false_node": "reject-capacity"
+    },
+    "approve-c-base": {
+      "id": "approve-c-base",
+      "type": "decision",
+      "label": "Cluster C · límite 1.500",
+      "decision": "APPROVED",
+      "risk_band": "C",
+      "credit_limit": 1500,
+      "reason_code": "DEMO_CLUSTER_C_BASE"
+    },
+    "d-income-cap": {
+      "id": "d-income-cap",
+      "type": "condition",
+      "label": "D · ingreso ≥ 4000",
+      "combination": "none",
+      "validations": [
+        {
+          "field": "variable_1",
+          "operator": "gte",
+          "value": 4000
+        }
+      ],
+      "true_node": "d-capacity-cap",
+      "false_node": "d-income-mid"
+    },
+    "d-income-mid": {
+      "id": "d-income-mid",
+      "type": "condition",
+      "label": "D · ingreso ≥ 3.000",
+      "combination": "none",
+      "validations": [
+        {
+          "field": "variable_1",
+          "operator": "gte",
+          "value": 3000
+        }
+      ],
+      "true_node": "d-capacity-mid",
+      "false_node": "d-capacity-base"
+    },
+    "d-capacity-cap": {
+      "id": "d-capacity-cap",
+      "type": "condition",
+      "label": "D · deuda entre 0 y 479",
+      "combination": "AND",
+      "validations": [
+        {
+          "field": "variable_2",
+          "operator": "has_value",
+          "value": true
+        },
+        {
+          "field": "variable_2",
+          "operator": "gte",
+          "value": 0
+        },
+        {
+          "field": "variable_2",
+          "operator": "lte",
+          "value": 479
+        }
+      ],
+      "true_node": "approve-d-cap",
+      "false_node": "reject-capacity"
+    },
+    "approve-d-cap": {
+      "id": "approve-d-cap",
+      "type": "decision",
+      "label": "Cluster D · límite 4.000",
+      "decision": "APPROVED",
+      "risk_band": "D",
+      "credit_limit": 4000,
+      "reason_code": "DEMO_CLUSTER_D_CAP"
+    },
+    "d-capacity-mid": {
+      "id": "d-capacity-mid",
+      "type": "condition",
+      "label": "D · deuda entre 0 y 359",
+      "combination": "AND",
+      "validations": [
+        {
+          "field": "variable_2",
+          "operator": "has_value",
+          "value": true
+        },
+        {
+          "field": "variable_2",
+          "operator": "gte",
+          "value": 0
+        },
+        {
+          "field": "variable_2",
+          "operator": "lte",
+          "value": 359
+        }
+      ],
+      "true_node": "approve-d-mid",
+      "false_node": "reject-capacity"
+    },
+    "approve-d-mid": {
+      "id": "approve-d-mid",
+      "type": "decision",
+      "label": "Cluster D · límite 3.000",
+      "decision": "APPROVED",
+      "risk_band": "D",
+      "credit_limit": 3000,
+      "reason_code": "DEMO_CLUSTER_D_MID"
+    },
+    "d-capacity-base": {
+      "id": "d-capacity-base",
+      "type": "condition",
+      "label": "D · deuda entre 0 y 119",
+      "combination": "AND",
+      "validations": [
+        {
+          "field": "variable_2",
+          "operator": "has_value",
+          "value": true
+        },
+        {
+          "field": "variable_2",
+          "operator": "gte",
+          "value": 0
+        },
+        {
+          "field": "variable_2",
+          "operator": "lte",
+          "value": 119
+        }
+      ],
+      "true_node": "approve-d-base",
+      "false_node": "reject-capacity"
+    },
+    "approve-d-base": {
+      "id": "approve-d-base",
+      "type": "decision",
+      "label": "Cluster D · límite 1.000",
+      "decision": "APPROVED",
+      "risk_band": "D",
+      "credit_limit": 1000,
+      "reason_code": "DEMO_CLUSTER_D_BASE"
+    },
+    "reject-income": {
+      "id": "reject-income",
+      "type": "decision",
+      "label": "Rechazo · ingreso insuficiente",
+      "decision": "REJECTED",
+      "risk_band": "UNAVAILABLE",
+      "credit_limit": 0,
+      "reason_code": "DEMO_R05_INCOME"
+    },
+    "reject-score": {
+      "id": "reject-score",
+      "type": "decision",
+      "label": "Rechazo · score ausente",
+      "decision": "REJECTED",
+      "risk_band": "UNAVAILABLE",
+      "credit_limit": 0,
+      "reason_code": "DEMO_R06_SCORE_UNAVAILABLE"
+    },
+    "reject-capacity": {
+      "id": "reject-capacity",
+      "type": "decision",
+      "label": "Rechazo · capacidad del tramo",
+      "decision": "REJECTED",
+      "risk_band": "UNAVAILABLE",
+      "credit_limit": 0,
+      "reason_code": "DEMO_R08_NO_PAYMENT_CAPACITY"
+    },
+    "manual-review": {
+      "id": "manual-review",
+      "type": "decision",
+      "label": "Sin cluster · revisión manual",
+      "decision": "REVIEW",
+      "risk_band": "UNASSIGNED",
+      "credit_limit": 0,
+      "reason_code": "DEMO_R07_MANUAL_REVIEW"
+    }
+  }
+}

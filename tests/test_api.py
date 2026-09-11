@@ -139,6 +139,68 @@ def test_duplicate_policy_version_returns_conflict(tmp_path, monkeypatch) -> Non
     assert response.status_code == 409
 
 
+def test_combined_candidate_save_evaluate_history_and_promotion(tmp_path, monkeypatch) -> None:
+    from pathlib import Path
+
+    from credit_policy_studio.models import Applicant
+    from credit_policy_studio.warehouse import DEMO_APPLICANTS
+
+    monkeypatch.chdir(tmp_path)
+    source = Path(__file__).parents[1] / "policies" / "credit_policy_v1.json"
+    policies = LocalPolicyRepository(source)
+    active = policies.get_active()
+    payload = active.model_dump(mode="json")
+    payload["metadata"].update(version="combined-candidate", status="draft")
+    node = payload["nodes"][active.root_node]
+    for key in ("field", "operator", "value"):
+        del node[key]
+    node.update(
+        combination="AND",
+        validations=[
+            {"field": "score_1", "operator": "has_value", "value": True},
+            {"field": "score_1", "operator": "gt", "value": 650},
+        ],
+    )
+    warehouse = MemoryWarehouse([DEMO_APPLICANTS[0], Applicant(user_id="missing-score")])
+    app.dependency_overrides[get_policy_repository] = lambda: policies
+    app.dependency_overrides[get_warehouse] = lambda: warehouse
+    app.dependency_overrides[get_scoring_service] = lambda: ScoringService(policies, warehouse)
+    client = TestClient(app)
+    url = "/api/policies/combined-candidate"
+    try:
+        assert client.post("/api/policies/publish", json={"policy": payload}).status_code == 200
+        assert client.get(url).json()["nodes"][active.root_node] == node
+        assert client.post("/api/policies/validate", json={"policy": payload}).status_code == 200
+        result = client.post(
+            "/predict",
+            json={"parameters": {"policy_version": "combined-candidate", "limit": 2}},
+        )
+        assert result.status_code == 200
+        run = result.json()["predictions"][0]
+        assert run["decisions"] == {"APPROVED": 1, "REJECTED": 1}
+        dashboard = client.get("/api/dashboard", params={"run_id": run["run_id"]}).json()
+        root = next(item for item in dashboard["nodes"] if item["node_id"] == active.root_node)
+        assert root["count"] == 2
+        node["combination"] = "OR"
+        assert client.put(url, json={"policy": payload}).status_code == 200
+        historical = client.get(url, params={"policy_sha256": run["policy_sha256"]}).json()
+        assert historical["nodes"][active.root_node]["combination"] == "AND"
+        assert client.get("/api/policy").json() == active.model_dump(mode="json")
+        node["combination"] = "none"
+        assert client.put(url, json={"policy": payload}).status_code == 422
+        assert client.get(url).json()["nodes"][active.root_node]["combination"] == "OR"
+        node["combination"] = "OR"
+        assert client.post(f"{url}/activate").status_code == 200
+        node["validations"][1]["value"] = 999
+        assert client.put(url, json={"policy": payload}).status_code == 409
+        assert (
+            client.get("/api/policy").json()["nodes"][active.root_node]["validations"][1]["value"]
+            == 650
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+
 def test_sagemaker_invocations_route_shares_the_predict_contract() -> None:
     from pathlib import Path
 
