@@ -186,6 +186,11 @@ label { display: block; margin-bottom: 15px; color: var(--text-soft); font-size:
 input, select { width: 100%; min-height: 42px; margin-top: 7px; padding: 0 11px; border: 1px solid var(--border-strong); border-radius: 9px; color: var(--text); background: var(--surface); outline: none; font-size: 12px; }
 input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(169,79,53,.09); }
 .field-row { display: grid; grid-template-columns: 1.35fr .65fr; gap: 9px; }
+.field-help { margin: -5px 0 15px; color: var(--text-soft); font-size: 11px; line-height: 1.5; }
+.validation-row { min-width: 0; margin: 0 0 15px; padding: 12px; border: 1px solid var(--border); border-radius: 9px; }
+.validation-row legend { padding: 0 5px; color: var(--text-soft); font-size: 11px; }
+.remove-validation { width: 100%; font-size: 11px; }
+#add-validation { margin-bottom: 15px; }
 .apply-button { border-color: var(--border); background: #faf8f5; }
 .apply-button:hover { border-color: var(--border-strong); background: #f6f2ee; }
 .apply-button:disabled, .apply-button:disabled:hover { transform: none; border-color: var(--border); background: #f3f1ee; }
