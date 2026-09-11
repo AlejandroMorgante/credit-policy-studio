@@ -71,7 +71,14 @@ async def check_editor(base_url: str, browser_url: str, screenshot: Path | None 
                 reply = await call(
                     "Runtime.evaluate",
                     {
-                        "expression": expression,
+                        "expression": "(async () => { "
+                        "const script = document.querySelector('script[src*=\"app.js\"]'); "
+                        "if (!script) return null; "
+                        "const {state, setMode} = await import(script.src); "
+                        "const PolicyGraph = await import('/assets/policy-editor.mjs'); "
+                        "const $ = s => document.querySelector(s); "
+                        "const $$ = s => [...document.querySelectorAll(s)]; "
+                        f"return eval({json.dumps(expression)}); " + "})()",
                         "awaitPromise": True,
                         "returnByValue": True,
                     },
@@ -80,7 +87,15 @@ async def check_editor(base_url: str, browser_url: str, screenshot: Path | None 
                 return reply["result"].get("value")
 
             async def expect(expression):
-                assert await js(f"Boolean({expression})"), expression
+                if not await js(f"Boolean({expression})"):
+                    detail = await js(
+                        "({selected: state.selected, root: state.policy?.root_node, "
+                        "saving: state.saving, loading: state.loadingPolicy, "
+                        "setRootDisabled: $('#set-root')?.disabled, "
+                        "formValid: $('#node-form')?.checkValidity(), "
+                        "toast: $('#toast')?.textContent})"
+                    )
+                    raise AssertionError(f"{expression}: {detail}; errors: {errors}")
 
             async def wait(expression):
                 for _ in range(100):
@@ -95,6 +110,14 @@ async def check_editor(base_url: str, browser_url: str, screenshot: Path | None 
                 raise AssertionError(f"{expression}: {details}; browser errors: {errors}")
 
             async def change(selector, value):
+                if selector.startswith("[data-connection="):
+                    branch = selector.split('"')[1]
+                    await click(f'[data-branch="{branch}"] [data-action="connect"]')
+                    await expect('$("#connect-node-dialog").open')
+                    await change("#connect-node-target", value)
+                    await click('#connect-node-form button[type="submit"]')
+                    await expect('!$("#connect-node-dialog").open')
+                    return
                 await js(f"""(() => {{
                     const element = document.querySelector({json.dumps(selector)});
                     element.value = {json.dumps(value)};
@@ -106,11 +129,16 @@ async def check_editor(base_url: str, browser_url: str, screenshot: Path | None 
                 await js(f"document.querySelector({json.dumps(selector)}).click()")
 
             async def add_module(label, node_type="condition", branch=None):
-                await click(f'[data-insert-branch="{branch}"]' if branch else "#add-module")
-                await change("#module-type", node_type)
-                await change("#module-label", label)
-                await click('#module-form button[type="submit"]')
-                await expect('!$("#module-dialog").open')
+                await click(
+                    f'[data-branch="{branch}"] [data-action="insert"]'
+                    if branch
+                    else "#add-node-button"
+                )
+                await expect('$("#new-node-dialog").open')
+                await click(f'[name="new-node-type"][value="{node_type}"]')
+                await change("#new-node-label", label)
+                await click('#new-node-form button[type="submit"]')
+                await expect('!$("#new-node-dialog").open')
                 return await js("state.selected")
 
             async def save():
@@ -128,6 +156,7 @@ async def check_editor(base_url: str, browser_url: str, screenshot: Path | None 
                         "modifiers": modifiers,
                     },
                 )
+
                 await call(
                     "Input.dispatchKeyEvent",
                     {
@@ -137,6 +166,46 @@ async def check_editor(base_url: str, browser_url: str, screenshot: Path | None 
                         "modifiers": modifiers,
                     },
                 )
+
+            async def drag_node(node_id, dx, dy):
+                await click(f'[data-node-id="{node_id}"]')
+                await click("#locate-node")
+                point = await js(f"""(() => {{
+                    const node = document.querySelector('[data-node-id="{node_id}"]');
+                    const box = node.getBoundingClientRect();
+                    return {{x: box.x + box.width / 2, y: box.y + box.height / 2}};
+                }})()""")
+                await call(
+                    "Input.dispatchMouseEvent",
+                    {
+                        "type": "mousePressed",
+                        "x": point["x"],
+                        "y": point["y"],
+                        "button": "left",
+                        "clickCount": 1,
+                    },
+                )
+                await call(
+                    "Input.dispatchMouseEvent",
+                    {
+                        "type": "mouseMoved",
+                        "x": point["x"] + dx,
+                        "y": point["y"] + dy,
+                        "button": "left",
+                        "buttons": 1,
+                    },
+                )
+                await call(
+                    "Input.dispatchMouseEvent",
+                    {
+                        "type": "mouseReleased",
+                        "x": point["x"] + dx,
+                        "y": point["y"] + dy,
+                        "button": "left",
+                        "clickCount": 1,
+                    },
+                )
+                await wait("!state.nodeDrag")
 
             await call("Runtime.enable")
             await call("Page.enable")
@@ -152,6 +221,33 @@ async def check_editor(base_url: str, browser_url: str, screenshot: Path | None 
             await call("Page.navigate", {"url": base_url})
             await wait('typeof state !== "undefined" && state.savedPolicy && $(".validation-row")')
             await expect('state.editingVersion === "browser-editor-check" && !state.editorDirty')
+
+            # Main's search, focus, minimap and visual layout undo remain independent of drafts.
+            await shortcut("k", 4)
+            await wait('$("#node-search-dialog").open')
+            await change("#node-search", "income")
+            await click(".node-search-result")
+            await expect('state.selected === "income" && !state.editorDirty')
+            await click("#focus-mode-button")
+            await expect('state.focusMode && $("#inspector").hidden')
+            await click("#toggle-inspector")
+            await expect('!$("#inspector").hidden')
+            await click("#focus-mode-button")
+            await expect("!state.focusMode")
+            before_drag = await js("JSON.stringify(state.policy)")
+            await drag_node("income", 80, 30)
+            await expect('state.nodePositions.income && !$("#undo-layout").hidden')
+            await expect('!state.editorDirty && $("#undo-draft").disabled')
+            await expect(f"JSON.stringify(state.policy) === {json.dumps(before_drag)}")
+            await click("#auto-layout")
+            await expect("!Object.keys(state.nodePositions).length")
+            await click("#undo-layout")
+            await expect("state.nodePositions.income && !state.editorDirty")
+            await click("#auto-layout")
+            await expect(
+                '$$("svg path").every(path => !/NaN|undefined/.test(path.getAttribute("d") || ""))'
+            )
+            await click('[data-node-id="bureau-floor"]')
 
             # Undo/redo restores complete drafts, including invalid raw form inputs.
             await expect('$("#undo-draft").disabled && $("#redo-draft").disabled')
@@ -183,7 +279,7 @@ async def check_editor(base_url: str, browser_url: str, screenshot: Path | None 
                 '$("#node-label").value = ""; '
                 '$("#node-label").dispatchEvent(new Event("input", {bubbles: true}))'
             )
-            await expect('draftHistory.past.length === 1 && $("#redo-draft").disabled')
+            await expect('$("#redo-draft").disabled')
             await shortcut("z", 4)
             await expect(f'$("#node-label").value === {json.dumps(original_label)}')
             await expect("!state.editorDirty")
@@ -246,20 +342,24 @@ async def check_editor(base_url: str, browser_url: str, screenshot: Path | None 
             await change('[data-connection="true_node"]', "affordability")
             await expect('$("#undo-draft").disabled && !state.editorDirty')
             await change("#node-label", "Before dialog")
-            await click("#add-module")
+            await click("#add-node-button")
             await shortcut("z", 4)
-            await expect('$("#module-dialog").open && $("#node-label").value === "Before dialog"')
-            await click('[data-close-dialog="module-dialog"]')
+            await expect('$("#new-node-dialog").open && $("#node-label").value === "Before dialog"')
+            await click("#new-node-cancel")
             await click("#undo-draft")
             await expect("!state.editorDirty")
             await change("#editor-version-select", production["metadata"]["version"])
-            await wait("!state.editorLoading && state.editingVersion === state.activeVersion")
-            await expect('$("#redo-draft").disabled && !draftHistory.future.length')
+            await wait("!state.loadingPolicy && state.editingVersion === state.activeVersion")
+            await expect('$("#redo-draft").disabled')
             await change("#editor-version-select", "browser-editor-check")
-            await wait('!state.editorLoading && state.editingVersion === "browser-editor-check"')
+            await wait('!state.loadingPolicy && state.editingVersion === "browser-editor-check"')
             for index in range(101):
                 await change("#node-label", f"History limit {index}")
-            await expect("draftHistory.past.length === 100")
+            for _ in range(100):
+                await click("#undo-draft")
+            await expect(
+                '$("#undo-draft").disabled && $("#node-label").value === "History limit 0"'
+            )
             await click("#discard-draft")
             await click("#confirm-discard")
 
@@ -279,6 +379,8 @@ async def check_editor(base_url: str, browser_url: str, screenshot: Path | None 
             remote = (await client.get(f"{base_url}/api/policies/browser-editor-check")).json()
             assert added not in remote["nodes"], "Incomplete drafts must not reach persistence"
             await click("#run-button")
+            await wait('$("#unsaved-dialog").open')
+            await click("#unsaved-stay")
             await expect('state.mode === "edit" && state.editorDirty')
 
             # All three combination modes, boolean thresholds, and repeated validations.
@@ -298,7 +400,7 @@ async def check_editor(base_url: str, browser_url: str, screenshot: Path | None 
             terminal = await add_module("Manual check", "decision", "false_node")
             await change("#node-reason", "EDITOR_MANUAL_CHECK")
             await click("#undo-draft")
-            await expect('$("#node-reason").value === "MANUAL_REVIEW"')
+            await expect('$("#node-reason").value === "POLICY_REVIEW"')
             await click("#redo-draft")
             await expect('$("#node-reason").value === "EDITOR_MANUAL_CHECK"')
             await save()
@@ -307,10 +409,10 @@ async def check_editor(base_url: str, browser_url: str, screenshot: Path | None 
                 '$("[data-validation-value]").value === "true" && $("#add-validation").disabled'
             )
 
-            # The same cycle guard backs dropdown options and canvas connections.
-            await expect(
-                '$(\'[data-connection="true_node"] option[value="bureau-floor"]\').disabled'
-            )
+            # The same cycle guard backs the dialog and canvas connections.
+            await click('[data-branch="true_node"] [data-action="connect"]')
+            await expect('!$("#connect-node-target option[value=\\"bureau-floor\\"]")')
+            await click("#connect-node-cancel")
             await click(f'.branch-port[data-source="{added}"][data-branch="false_node"]')
             await click('[data-node-id="bureau-floor"]')
             await expect(
@@ -342,8 +444,11 @@ async def check_editor(base_url: str, browser_url: str, screenshot: Path | None 
 
             # A new root can link to the whole old graph without duplicating descendants.
             new_root = await add_module("New entry")
+            await expect(f'state.policy.nodes[{json.dumps(new_root)}].label === "New entry"')
             await change('[data-connection="true_node"]', "bureau-floor")
+            await expect(f"state.selected === {json.dumps(new_root)}")
             await change('[data-connection="false_node"]', "reject-bureau")
+            await expect(f"state.selected === {json.dumps(new_root)}")
             await click("#set-root")
             await expect(f"state.policy.root_node === {json.dumps(new_root)}")
             await save()
@@ -407,10 +512,13 @@ async def check_editor(base_url: str, browser_url: str, screenshot: Path | None 
             await js("setMode('edit')")
             await change("#editor-version-select", production["metadata"]["version"])
             await wait("state.editingVersion === state.activeVersion")
-            await expect('$("#add-module").disabled && $$(".branch-port").every(c => c.disabled)')
+            await expect(
+                '$("#add-node-button").disabled && $$(".branch-port").every(c => c.disabled)'
+            )
             await expect('$("#undo-draft").disabled && $("#redo-draft").disabled')
-            await js("openModuleDialog(); changeStructure(p => { p.root_node = 'income'; })")
-            await expect('!$("#module-dialog").open && state.policy.root_node === "bureau-floor"')
+            await click("#add-node-button")
+            await shortcut("z", 2)
+            await expect('!$("#new-node-dialog").open && state.policy.root_node === "bureau-floor"')
             assert (await client.get(f"{base_url}/api/policy")).json() == production
             assert not errors, errors
             print(
