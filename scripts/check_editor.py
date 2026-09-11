@@ -137,6 +137,17 @@ async def check_editor(base_url: str, browser_url: str, screenshot: Path | None 
                 await expect('$("#new-node-dialog").open')
                 await click(f'[name="new-node-type"][value="{node_type}"]')
                 await change("#new-node-label", label)
+                if node_type == "decision":
+                    branch_label = "Sí" if branch == "true_node" else "No"
+                    expected_preview = (
+                        f"La rama {branch_label} termina en este resultado."
+                        if branch
+                        else "El resultado quedará sin conectar en el borrador."
+                    )
+                    await expect(
+                        '$("#new-node-preview").textContent.startsWith('
+                        f"{json.dumps(expected_preview)})"
+                    )
                 await click('#new-node-form button[type="submit"]')
                 await expect('!$("#new-node-dialog").open')
                 return await js("state.selected")

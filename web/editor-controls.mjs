@@ -386,9 +386,12 @@ export function setupEditorControls({ state, api, toast, renderTree, selectNode,
     try {
       const result = newNodeOperation();
       const node = result.policy.nodes[result.selected];
+      const placement = $("#new-node-placement").value;
       $("#new-node-preview").textContent = node.type === "condition"
         ? `Si se cumple, continúa hacia «${(result.policy.nodes[node.true_node]?.label || "Sin conectar")}». Si no, va a «${(result.policy.nodes[node.false_node]?.label || "Sin conectar")}».`
-        : `La rama ${branchName($("#new-node-placement").value)} termina en este resultado.${retainedNote()}`;
+        : placement === "detached"
+          ? "El resultado quedará sin conectar en el borrador."
+          : `La rama ${branchName(placement)} termina en este resultado.${retainedNote()}`;
     } catch (error) { $("#new-node-preview").textContent = error.message; }
   }
   $("#new-node-form").addEventListener("change", () => updateNewNodeForm());
