@@ -93,7 +93,7 @@ class CreditPolicy(BaseModel):
         self._validate_acyclic()
         return self
 
-    def _validate_acyclic(self) -> None:
+    def _validate_acyclic(self) -> set[str]:
         visiting: set[str] = set()
         visited: set[str] = set()
 
@@ -111,6 +111,15 @@ class CreditPolicy(BaseModel):
             visited.add(node_id)
 
         visit(self.root_node)
+        return visited
+
+    def validate_connected(self) -> None:
+        """Require a complete executable graph on writes, preserving historical reads."""
+        disconnected = self.nodes.keys() - self._validate_acyclic()
+        if disconnected:
+            raise ValueError(
+                f"nodes not reachable from root_node: {', '.join(sorted(disconnected))}"
+            )
 
 
 class Applicant(BaseModel):
@@ -188,3 +197,8 @@ class RunSummary(BaseModel):
 
 class PublishPolicyRequest(BaseModel):
     policy: CreditPolicy
+
+    @model_validator(mode="after")
+    def validate_connected_policy(self) -> PublishPolicyRequest:
+        self.policy.validate_connected()
+        return self

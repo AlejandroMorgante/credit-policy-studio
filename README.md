@@ -350,6 +350,12 @@ Before opening or approving a pull request:
 Magpie complements the deterministic project checks; it does not replace `make lint`, `make test`,
 Terraform validation, or review of the infrastructure plan.
 
+For changes to the visual editor, run `.venv/bin/python scripts/check_editor.py` with Chrome
+installed (or pass `--chrome /path/to/chrome`). This checks the real UI against an isolated local
+server and temporary candidate policies, including structural edits, incomplete drafts, persistence,
+and productive-version protection. It uses the existing development environment and does not touch
+the policies in your local workspace. The browser check is an explicit local check, not a CI job.
+
 ## Design choices
 
 - Human versions are readable; SHA-256 makes the exact policy content verifiable.

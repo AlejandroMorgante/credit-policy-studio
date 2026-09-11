@@ -6,7 +6,7 @@
     <meta name="color-scheme" content="light" />
     <meta name="description" content="Diseñá, versioná y explicá políticas de crédito sin tocar código." />
     <title>Credit Policy Studio</title>
-    <link rel="stylesheet" href="/assets/styles.css?v=5" />
+    <link rel="stylesheet" href="/assets/styles.css?v=7" />
   </head>
   <body data-mode="edit">
     <div class="shell">
@@ -52,7 +52,7 @@
             </div>
             <div class="editor-guidance" id="editor-guidance">
               <strong>Candidata editable</strong>
-              <span>Aplicar guarda el cambio en esta versión. Producción no se modifica.</span>
+              <span>Armá módulos y conexiones; Guardar política conserva el árbol completo.</span>
             </div>
           </div>
           <div class="impact-summary" aria-label="Resumen de impacto">
@@ -67,11 +67,17 @@
           <div class="workspace-grid">
             <section class="canvas-card">
               <div class="canvas-toolbar">
-                <div><h2 id="canvas-title">Árbol de decisión</h2><p id="canvas-subtitle">Seleccioná un nodo para editar su regla.</p></div>
+                <div><h2 id="canvas-title">Árbol de decisión</h2><p id="canvas-subtitle">Agregá módulos y conectá las ramas Sí y No.</p></div>
+                <button class="button secondary" id="add-module" type="button" data-structure-control>+ Agregar módulo</button>
                 <div class="segmented" role="group" aria-label="Modo de visualización">
                   <button class="active" data-tree-mode="edit">Editar</button><button data-tree-mode="impact">Resultados</button>
                 </div>
               </div>
+              <div class="draft-history" id="draft-history" role="group" aria-label="Historial del borrador">
+                <button class="button secondary" id="undo-draft" type="button" title="Deshacer (⌘Z / Ctrl+Z)" aria-keyshortcuts="Meta+Z Control+Z" disabled>↶ Deshacer</button>
+                <button class="button secondary" id="redo-draft" type="button" title="Rehacer (⌘⇧Z / Ctrl+Shift+Z / Ctrl+Y)" aria-keyshortcuts="Meta+Shift+Z Control+Shift+Z Control+Y" disabled>↷ Rehacer</button>
+              </div>
+              <div class="draft-status" id="draft-status" role="status" aria-live="polite" hidden></div>
               <div class="tree-viewport" id="tree-viewport" tabindex="0" aria-label="Lienzo navegable. Arrastrá para mover y usá la rueda para acercar o alejar.">
                 <div class="tree-stage" id="tree-stage"><svg id="tree-links" aria-hidden="true"></svg><div id="tree-nodes"></div></div>
                 <div class="canvas-hint"><svg viewBox="0 0 24 24"><path d="M9 11V6a1 1 0 0 1 2 0v4-5a1 1 0 0 1 2 0v5-4a1 1 0 0 1 2 0v5-3a1 1 0 0 1 2 0v6c0 4-2 6-6 6h-1c-2 0-3-1-4-3l-2-4a1 1 0 0 1 2-1l3 3"/></svg><span>Arrastrá para mover · rueda para zoom</span></div>
@@ -89,7 +95,7 @@
                 <div><span class="panel-kicker">NODO SELECCIONADO</span><h2 id="inspector-title">Nodo</h2></div><span class="node-tag" id="node-tag">CONDICIÓN</span>
               </div>
               <form id="node-form">
-                <label>Nombre visible<input id="node-label" name="label" /></label>
+                <label>Nombre visible<input id="node-label" name="label" required /></label>
                 <div id="condition-fields">
                   <label>Tipo de combinación<select id="node-combination" aria-describedby="combination-help"><option value="none">Sin combinación</option><option value="AND">AND</option><option value="OR">OR</option></select></label>
                   <p class="field-help" id="combination-help"></p>
@@ -99,8 +105,15 @@
                 <div id="decision-fields" hidden>
                   <label>Decisión<select id="node-decision"><option>APPROVED</option><option>REVIEW</option><option>REJECTED</option></select></label>
                   <div class="field-row"><label>Banda<input id="node-band" /></label><label>Límite<input id="node-limit" type="number" min="0" /></label></div>
+                  <label>Motivo<input id="node-reason" required /></label>
                 </div>
-                <button class="button full apply-button" type="submit">Aplicar cambios</button>
+                <section id="node-connections" aria-label="Conexiones del módulo"></section>
+                <div class="module-actions">
+                  <button class="button secondary" id="set-root" type="button" data-structure-control>Usar como inicio</button>
+                  <button class="button secondary" id="delete-module" type="button" data-structure-control>Eliminar módulo</button>
+                </div>
+                <button class="button full apply-button" type="submit">Guardar política</button>
+                <button class="button secondary full" id="discard-draft" type="button" disabled>Descartar cambios</button>
               </form>
               <template id="validation-template">
                 <fieldset class="validation-row">
@@ -125,6 +138,28 @@
     </div>
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <dialog id="module-dialog">
+      <form id="module-form">
+        <p class="panel-kicker">CONSTRUIR POLÍTICA</p><h2>Agregar módulo</h2>
+        <p id="module-context"></p>
+        <label>Tipo<select id="module-type"><option value="condition">Condición</option><option value="decision">Decisión final</option></select></label>
+        <label>Nombre visible<input id="module-label" required /></label>
+        <p class="field-help">Al insertar una condición, la rama Sí conserva el destino anterior y la rama No queda pendiente. Una decisión final termina el recorrido.</p>
+        <menu><button class="button secondary" type="button" data-close-dialog="module-dialog">Cancelar</button><button class="button primary" type="submit">Agregar al borrador</button></menu>
+      </form>
+    </dialog>
+    <dialog id="delete-module-dialog">
+      <form id="delete-module-form">
+        <h2>Eliminar módulo</h2><p id="delete-module-detail"></p>
+        <label id="replacement-root-field">Nuevo inicio<select id="replacement-root"></select></label>
+        <p>Los módulos siguientes se conservan. Las conexiones que llegaban a éste quedarán pendientes hasta que elijas otro destino.</p>
+        <menu><button class="button secondary" type="button" data-close-dialog="delete-module-dialog">Cancelar</button><button class="button primary" type="submit">Eliminar del borrador</button></menu>
+      </form>
+    </dialog>
+    <dialog id="discard-dialog">
+      <h2>Descartar cambios sin guardar</h2><p>Se restaurará la última política guardada. Los módulos y conexiones agregados en este borrador se perderán.</p>
+      <menu><button class="button secondary" type="button" data-close-dialog="discard-dialog">Volver</button><button class="button primary" id="confirm-discard" type="button">Descartar cambios</button></menu>
+    </dialog>
     <dialog id="versions-dialog" class="versions-dialog">
       <button class="dialog-close" id="versions-close" type="button" aria-label="Cerrar">×</button>
       <p class="panel-kicker">BIBLIOTECA</p><h2>Versiones de la política</h2>
@@ -138,7 +173,7 @@
       <p class="help-intro">Probá cambios sin afectar consumidores y promovelos sólo cuando el resultado sea el esperado.</p>
       <ol class="guide-steps">
         <li><span>1</span><div><strong>Elegí la versión a editar</strong><p>En Política, seleccioná una candidata. La productiva puede inspeccionarse, pero está bloqueada.</p></div></li>
-        <li><span>2</span><div><strong>Aplicá cada cambio</strong><p>Editá una regla y elegí <b>Aplicar cambios</b>. El cambio queda guardado en esa misma candidata.</p></div></li>
+        <li><span>2</span><div><strong>Construí la política</strong><p>Agregá módulos, conectá las ramas Sí/No y elegí <b>Guardar política</b> cuando no queden conexiones pendientes.</p></div></li>
         <li><span>3</span><div><strong>Evaluá una versión</strong><p>En Evaluación, elegí una versión y ejecutala contra el dataset. Los resultados pertenecen sólo a esa corrida.</p></div></li>
         <li><span>4</span><div><strong>Leé el recorrido</strong><p>Los números sobre las ramas muestran cuántos usuarios siguieron cada camino.</p></div></li>
         <li><span>5</span><div><strong>Promové a productiva</strong><p>Cuando estés conforme, promovela. Desde entonces será la versión usada por consumidores que no indiquen otra.</p></div></li>
@@ -161,6 +196,7 @@
         <menu><button class="button secondary" value="cancel">Cancelar</button><button class="button primary" id="confirm-publish" value="default">Guardar versión</button></menu>
       </form>
     </dialog>
-    <script src="/assets/app.js?v=19" defer></script>
+    <script src="/assets/policy-graph.js?v=1" defer></script>
+    <script src="/assets/app.js?v=21" defer></script>
   </body>
 </html>

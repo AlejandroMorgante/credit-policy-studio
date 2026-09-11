@@ -11,7 +11,16 @@ const state = {
   editorSelected: null,
   pendingPromotionVersion: null,
   dashboardRequest: 0,
+  savedPolicy: null,
+  editorDirty: false,
+  saving: false,
+  editorLoading: false,
+  insertion: null,
+  connecting: null,
+  formBaseline: null,
 };
+const draftHistory = { past: [], future: [], current: null, group: null };
+const HISTORY_LIMIT = 100;
 const viewportState = {
   x: 0,
   y: 0,
@@ -22,7 +31,7 @@ const viewportState = {
   pinchDistance: null,
   dragged: false,
 };
-const MIN_ZOOM = 0.55;
+const MIN_ZOOM = 0.15;
 const MAX_ZOOM = 1.5;
 const NODE_WIDTH = 188;
 const NODE_HEIGHT = 80;
@@ -53,29 +62,6 @@ async function api(path, options = {}) {
     throw new Error(body || `${response.status} ${response.statusText}`);
   }
   return response.json();
-}
-
-function hierarchy(policy) {
-  const children = (id) => {
-    const node = policy.nodes[id];
-    return node.type === "condition" ? [node.true_node, node.false_node] : [];
-  };
-  const depth = {};
-  const visitDepth = (id, level) => {
-    depth[id] = Math.max(depth[id] ?? 0, level);
-    children(id).forEach((child) => visitDepth(child, level + 1));
-  };
-  visitDepth(policy.root_node, 0);
-  let leafIndex = 0;
-  const x = {};
-  const assignX = (id) => {
-    const kids = children(id);
-    if (!kids.length) return (x[id] = 36 + leafIndex++ * 200);
-    const values = kids.map(assignX);
-    return (x[id] = values.reduce((a, b) => a + b, 0) / values.length);
-  };
-  assignX(policy.root_node);
-  return { x, depth, children, width: Math.max(1080, leafIndex * 200 + 72) };
 }
 
 function clampZoom(scale) {
@@ -139,7 +125,7 @@ function zoomFromCenter(factor) {
 
 function renderTree() {
   if (!state.policy) return;
-  const { x, depth, children, width } = hierarchy(state.policy);
+  const { x, depth, width, connected } = PolicyGraph.layout(state.policy);
   const nodeCounts = Object.fromEntries((state.dashboard?.nodes || []).map((n) => [n.node_id, n.count]));
   const pathCounts = new Map((state.dashboard?.paths || []).map((p) => [`${p.source}:${p.target}`, Number(p.count)]));
   const maxPathCount = Math.max(1, ...pathCounts.values());
@@ -152,17 +138,50 @@ function renderTree() {
   Object.values(state.policy.nodes).forEach((node) => {
     const button = document.createElement("button");
     const decisionClass = node.type === "decision" ? ` decision ${node.decision}` : "";
-    button.className = `tree-node${decisionClass}${state.selected === node.id ? " selected" : ""}`;
+    button.className = `tree-node${decisionClass}${state.selected === node.id ? " selected" : ""}${connected.has(node.id) ? "" : " disconnected"}`;
+    button.dataset.nodeId = node.id;
+    button.title = node.label;
     button.style.left = `${x[node.id]}px`; button.style.top = `${24 + depth[node.id] * LEVEL_GAP}px`;
-    const count = state.mode === "impact" ? `<span class="impact-badge">${nodeCounts[node.id] || 0}</span>` : "";
-    button.innerHTML = `<span class="type"><span>${node.type === "condition" ? "Condición" : node.decision}</span>${count}</span><strong>${node.label}</strong>`;
+    const type = document.createElement("span");
+    type.className = "type";
+    type.textContent = `${node.id === state.policy.root_node ? "Inicio · " : ""}${node.type === "condition" ? "Condición" : node.decision}${connected.has(node.id) ? "" : " · Sin conectar"}`;
+    const label = document.createElement("strong");
+    label.textContent = node.label;
+    button.append(type, label);
+    if (state.mode === "impact") {
+      const count = document.createElement("span");
+      count.className = "impact-badge";
+      count.textContent = nodeCounts[node.id] || 0;
+      type.append(count);
+    }
     button.addEventListener("click", () => {
       if (viewportState.dragged) return;
+      if (state.connecting) {
+        changeConnection(state.connecting.source, state.connecting.branch, node.id);
+        return;
+      }
+      if (!captureNodeForm()) return;
       selectNode(node.id);
     }); nodes.appendChild(button);
 
-    children(node.id).forEach((child, index) => {
-      const startX = x[node.id] + NODE_WIDTH / 2, startY = 24 + depth[node.id] * LEVEL_GAP + NODE_HEIGHT;
+    PolicyGraph.edges(node).forEach(({ branch: branchKey, target: child }, index) => {
+      if (state.mode === "edit") {
+        const port = document.createElement("button");
+        port.className = `branch-port${child ? "" : " pending"}`;
+        port.type = "button";
+        port.dataset.source = node.id;
+        port.dataset.branch = branchKey;
+        port.textContent = `${index === 0 ? "Sí" : "No"} →`;
+        port.setAttribute("aria-label", `Conectar rama ${index === 0 ? "Sí" : "No"} de ${node.label}`);
+        port.style.left = `${x[node.id] + index * (NODE_WIDTH / 2)}px`;
+        port.style.top = `${24 + depth[node.id] * LEVEL_GAP + NODE_HEIGHT + 3}px`;
+        port.disabled = editorLocked();
+        port.addEventListener("click", () => startConnection(node.id, branchKey));
+        nodes.append(port);
+      }
+      if (typeof child !== "string" || !Object.hasOwn(state.policy.nodes, child)) return;
+      const startX = x[node.id] + (state.mode === "edit" ? index * NODE_WIDTH / 2 + 41 : NODE_WIDTH / 2);
+      const startY = 24 + depth[node.id] * LEVEL_GAP + NODE_HEIGHT + (state.mode === "edit" ? 28 : 0);
       const endX = x[child] + NODE_WIDTH / 2, endY = 24 + depth[child] * LEVEL_GAP;
       const middle = startY + (endY - startY) / 2;
       const ns = "http://www.w3.org/2000/svg";
@@ -194,16 +213,8 @@ function renderTree() {
         branch.setAttribute("class", "link-label");
         branch.textContent = branchLabel;
         labelGroup.append(branch, countLabel);
-      } else {
-        const label = document.createElementNS(ns, "text");
-        label.setAttribute("x", `${labelX}`);
-        label.setAttribute("y", `${labelY}`);
-        label.setAttribute("text-anchor", "middle");
-        label.setAttribute("class", "link-label");
-        label.textContent = branchLabel;
-        labelGroup.appendChild(label);
       }
-      svg.appendChild(labelGroup);
+      if (state.mode === "impact") svg.appendChild(labelGroup);
     });
   });
   if (!viewportState.initialized) requestAnimationFrame(fitTree);
@@ -217,7 +228,7 @@ function setupViewportInteractions() {
   }, { passive: false });
 
   viewport.addEventListener("pointerdown", (event) => {
-    if (event.button !== 0 || event.target.closest(".canvas-controls") || event.target.closest(".tree-node")) return;
+    if (event.button !== 0 || event.target.closest("button")) return;
     viewport.setPointerCapture(event.pointerId);
     viewportState.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
     viewportState.lastPoint = { x: event.clientX, y: event.clientY };
@@ -261,7 +272,8 @@ function setupViewportInteractions() {
     if (!event.target.closest(".tree-node")) fitTree();
   });
   viewport.addEventListener("keydown", (event) => {
-    if (event.key === "+" || event.key === "=") zoomFromCenter(1.15);
+    if (event.key === "Escape") { state.connecting = null; syncDraftUi(); }
+    else if (event.key === "+" || event.key === "=") zoomFromCenter(1.15);
     else if (event.key === "-") zoomFromCenter(1 / 1.15);
     else if (event.key === "0") fitTree();
     else return;
@@ -286,7 +298,12 @@ function selectNode(id) {
     (node.validations || [node]).forEach(addValidationRow);
   } else {
     $("#node-decision").value = node.decision; $("#node-band").value = node.risk_band; $("#node-limit").value = node.credit_limit;
+    $("#node-reason").value = node.reason_code;
   }
+  renderConnections(node);
+  state.formBaseline = readNodeForm();
+  draftHistory.current = editorSnapshot();
+  draftHistory.group = null;
   renderTree();
   syncEditorLock();
 }
@@ -348,13 +365,16 @@ function readValidations() {
 
 $("#node-combination").addEventListener("change", syncEditorLock);
 $("#add-validation").addEventListener("click", () => {
+  if (editorLocked()) return;
   addValidationRow();
+  markEditorDirty();
   syncEditorLock();
   $("#node-validations").lastElementChild.querySelector("select").focus();
 });
 $("#node-validations").addEventListener("click", (event) => {
-  if (!event.target.closest(".remove-validation")) return;
+  if (editorLocked() || !event.target.closest(".remove-validation")) return;
   event.target.closest(".validation-row").remove();
+  markEditorDirty();
   syncEditorLock();
 });
 $("#node-validations").addEventListener("change", (event) => {
@@ -363,8 +383,327 @@ $("#node-validations").addEventListener("change", (event) => {
   const previous = row.querySelector("[data-validation-value]");
   const value = previous.type === "number" && previous.value !== "" ? Number(previous.value) : undefined;
   renderValidationThreshold(row, value);
+  markEditorDirty();
   syncEditorLock();
 });
+
+function editorLocked() {
+  return state.saving || state.editorLoading || state.mode !== "edit" || state.editingVersion === state.activeVersion;
+}
+
+// Keep raw inputs as well as the graph, so incomplete thresholds can also be undone.
+function readNodeForm() {
+  if (!state.policy?.nodes[state.selected]) return null;
+  const form = { label: $("#node-label").value };
+  if (state.policy.nodes[state.selected].type === "condition") {
+    form.combination = $("#node-combination").value;
+    form.validations = $$(".validation-row").map((row) => ({
+      field: row.querySelector("[data-validation-field]").value,
+      operator: row.querySelector("[data-validation-operator]").value,
+      value: row.querySelector("[data-validation-value]").value,
+    }));
+  } else {
+    form.decision = $("#node-decision").value;
+    form.band = $("#node-band").value;
+    form.limit = $("#node-limit").value;
+    form.reason = $("#node-reason").value;
+  }
+  return form;
+}
+
+function editorSnapshot() {
+  return { policy: structuredClone(state.policy), selected: state.selected, form: readNodeForm() };
+}
+
+function resetDraftHistory() {
+  draftHistory.past = [];
+  draftHistory.future = [];
+  draftHistory.group = null;
+  draftHistory.current = editorSnapshot();
+  syncDraftUi();
+}
+
+function updateDraftDirty() {
+  state.editorDirty = JSON.stringify(state.policy) !== JSON.stringify(state.savedPolicy)
+    || JSON.stringify(readNodeForm()) !== JSON.stringify(state.formBaseline);
+}
+
+function recordDraftEdit(before = draftHistory.current, group = null) {
+  const after = editorSnapshot();
+  if (before && JSON.stringify(before) !== JSON.stringify(after)) {
+    // Continuous typing in one field is one step; a new action invalidates redo.
+    if (!group || group !== draftHistory.group || !draftHistory.past.length) {
+      draftHistory.past.push(before);
+      if (draftHistory.past.length > HISTORY_LIMIT) draftHistory.past.shift();
+    }
+    draftHistory.future = [];
+    draftHistory.group = group;
+  }
+  draftHistory.current = after;
+  updateDraftDirty();
+  syncDraftUi();
+}
+
+function moveDraftHistory(direction) {
+  if (editorLocked() || $("dialog[open]")) return;
+  const source = direction === "undo" ? draftHistory.past : draftHistory.future;
+  const destination = direction === "undo" ? draftHistory.future : draftHistory.past;
+  if (!source.length) return;
+  destination.push(editorSnapshot());
+  const snapshot = source.pop();
+  state.policy = structuredClone(snapshot.policy);
+  state.connecting = null;
+  selectNode(snapshot.selected);
+  const form = snapshot.form;
+  $("#node-label").value = form.label;
+  if (form.validations) {
+    $("#node-combination").value = form.combination;
+    $("#node-validations").replaceChildren();
+    form.validations.forEach((validation) => {
+      addValidationRow({ field: validation.field, operator: validation.operator });
+      $("#node-validations").lastElementChild.querySelector("[data-validation-value]").value = validation.value;
+    });
+  } else {
+    $("#node-decision").value = form.decision;
+    $("#node-band").value = form.band;
+    $("#node-limit").value = form.limit;
+    $("#node-reason").value = form.reason;
+  }
+  draftHistory.current = editorSnapshot();
+  updateDraftDirty();
+  syncEditorLock();
+  focusSelectedNode();
+}
+
+function markEditorDirty(group = null) {
+  if (editorLocked()) return;
+  recordDraftEdit(draftHistory.current, group);
+}
+
+function syncDraftUi() {
+  const status = $("#draft-status");
+  status.replaceChildren();
+  $("#discard-draft").disabled = editorLocked() || !state.editorDirty;
+  $("#undo-draft").disabled = editorLocked() || !draftHistory.past.length;
+  $("#redo-draft").disabled = editorLocked() || !draftHistory.future.length;
+  $("#draft-history").hidden = state.mode !== "edit";
+  status.hidden = state.mode !== "edit" || (!state.editorDirty && !state.connecting);
+  if (status.hidden) return;
+  const text = document.createElement("span");
+  const issues = PolicyGraph.issues(state.policy);
+  text.textContent = state.connecting
+    ? `Elegí el módulo de destino para ${state.connecting.branch === "true_node" ? "Sí" : "No"} de ${state.policy.nodes[state.connecting.source].label}.`
+    : `Borrador sin guardar${issues.length ? ` · ${issues.length} pendientes` : " · listo para guardar"}.`;
+  status.append(text);
+  if (state.connecting) {
+    const cancel = document.createElement("button");
+    cancel.type = "button";
+    cancel.className = "button secondary";
+    cancel.textContent = "Cancelar conexión";
+    cancel.addEventListener("click", () => { state.connecting = null; syncDraftUi(); });
+    status.append(cancel);
+  } else if (issues.length) {
+    const details = document.createElement("details");
+    const summary = document.createElement("summary");
+    summary.textContent = "Ver pendientes";
+    const list = document.createElement("ul");
+    issues.forEach((issue) => { const item = document.createElement("li"); item.textContent = issue; list.append(item); });
+    details.append(summary, list);
+    status.append(details);
+  }
+}
+
+function captureNodeForm() {
+  if (editorLocked() || !state.policy?.nodes[state.selected]) return true;
+  if (!$("#node-form").reportValidity()) return false;
+  const node = state.policy.nodes[state.selected];
+  let validations;
+  if (node.type === "condition") {
+    try { validations = readValidations(); }
+    catch (error) { toast(error.message, true); return false; }
+  }
+  node.label = $("#node-label").value.trim();
+  if (node.type === "condition") {
+    const combination = $("#node-combination").value;
+    if (!node.validations && combination === "none" && validations.length === 1) {
+      Object.assign(node, validations[0]);
+    } else {
+      node.validations = validations;
+      node.combination = combination;
+      delete node.field; delete node.operator; delete node.value;
+    }
+  } else {
+    node.decision = $("#node-decision").value;
+    node.risk_band = $("#node-band").value;
+    node.credit_limit = Number($("#node-limit").value);
+    node.reason_code = $("#node-reason").value.trim();
+  }
+  state.formBaseline = readNodeForm();
+  draftHistory.current = editorSnapshot();
+  draftHistory.group = null;
+  updateDraftDirty();
+  syncDraftUi();
+  return true;
+}
+
+function readyToSave() {
+  if (!captureNodeForm()) return false;
+  const issues = PolicyGraph.issues(state.policy);
+  if (!issues.length) return true;
+  toast(`Completá el árbol antes de guardar: ${issues[0]}`, true);
+  syncDraftUi();
+  return false;
+}
+
+function canLeaveEditor() {
+  if (state.saving || state.editorLoading) return false;
+  if (state.mode !== "edit") return true;
+  if (!captureNodeForm()) return false;
+  if (!state.editorDirty) return true;
+  toast("Guardá la política o descartá el borrador antes de cambiar de versión o evaluar.", true);
+  return false;
+}
+
+function renderConnections(node) {
+  const panel = $("#node-connections");
+  panel.replaceChildren();
+  if (node.type !== "condition") return;
+  const heading = document.createElement("h3");
+  heading.textContent = "Conexiones";
+  panel.append(heading);
+  PolicyGraph.edges(node).forEach(({ branch, target }) => {
+    const row = document.createElement("div");
+    row.className = "connection-row";
+    const label = document.createElement("label");
+    label.textContent = branch === "true_node" ? "Si se cumple · Sí" : "Si no se cumple · No";
+    const select = document.createElement("select");
+    select.dataset.connection = branch;
+    select.add(new Option("Sin conectar", ""));
+    Object.values(state.policy.nodes).forEach((destination) => {
+      const option = new Option(destination.label, destination.id);
+      option.disabled = !PolicyGraph.canConnect(state.policy, node.id, destination.id);
+      select.add(option);
+    });
+    select.value = target || "";
+    select.addEventListener("change", () => changeConnection(node.id, branch, select.value || null));
+    label.append(select);
+    const add = document.createElement("button");
+    add.type = "button";
+    add.className = "button secondary full";
+    add.dataset.insertBranch = branch;
+    add.textContent = target ? "+ Insertar módulo en esta rama" : "+ Agregar módulo en esta rama";
+    add.addEventListener("click", () => openModuleDialog({ source: node.id, branch }));
+    row.append(label, add);
+    panel.append(row);
+  });
+}
+
+function changeStructure(change, selected = state.selected) {
+  if (editorLocked() || !captureNodeForm()) return false;
+  const before = editorSnapshot();
+  const policy = structuredClone(state.policy);
+  try { selected = change(policy) || selected; }
+  catch (error) { toast(error.message, true); renderConnections(state.policy.nodes[state.selected]); syncEditorLock(); return false; }
+  state.policy = policy;
+  state.connecting = null;
+  selectNode(selected);
+  recordDraftEdit(before);
+  return true;
+}
+
+function changeConnection(source, branch, target) {
+  changeStructure((policy) => { PolicyGraph.connect(policy, source, branch, target); }, source);
+}
+
+function startConnection(source, branch) {
+  if (editorLocked() || !captureNodeForm()) return;
+  selectNode(source);
+  state.connecting = { source, branch };
+  syncDraftUi();
+}
+
+function openModuleDialog(insertion = null) {
+  if (editorLocked() || !captureNodeForm()) return;
+  state.insertion = insertion;
+  $("#module-type").value = "condition";
+  $("#module-label").value = "";
+  $("#module-context").textContent = insertion
+    ? `Rama ${insertion.branch === "true_node" ? "Sí" : "No"} de ${state.policy.nodes[insertion.source].label}.`
+    : "El nuevo módulo aparecerá sin conectar. Conectalo a una rama existente o usalo como inicio.";
+  $("#module-dialog").showModal();
+}
+
+$("#node-form").addEventListener("input", (event) => {
+  if (event.target.matches("input")) markEditorDirty(event.target);
+});
+$("#node-form").addEventListener("change", (event) => {
+  if (event.target.matches("select") && !event.target.matches("[data-connection], [data-validation-operator]")) markEditorDirty();
+  draftHistory.group = null;
+});
+$("#undo-draft").addEventListener("click", () => moveDraftHistory("undo"));
+$("#redo-draft").addEventListener("click", () => moveDraftHistory("redo"));
+document.addEventListener("keydown", (event) => {
+  if (!(event.metaKey || event.ctrlKey) || event.altKey || event.isComposing || editorLocked() || $("dialog[open]")) return;
+  const key = event.key.toLowerCase();
+  if (key !== "z" && !(key === "y" && event.ctrlKey && !event.shiftKey)) return;
+  // Other text fields keep their native undo stack (e.g. version creation dialogs).
+  if (event.target.closest("input, textarea, select, [contenteditable]") && !event.target.closest("#node-form")) return;
+  event.preventDefault();
+  moveDraftHistory(key === "y" || event.shiftKey ? "redo" : "undo");
+});
+$("#add-module").addEventListener("click", () => openModuleDialog());
+$("#module-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  if (changeStructure((policy) => PolicyGraph.add(policy, $("#module-type").value, $("#module-label").value.trim(), state.insertion))) {
+    $("#module-dialog").close();
+    focusSelectedNode();
+  }
+});
+$("#set-root").addEventListener("click", () => changeStructure((policy) => { policy.root_node = state.selected; }));
+$("#delete-module").addEventListener("click", () => {
+  if (editorLocked() || !captureNodeForm()) return;
+  const node = state.policy.nodes[state.selected];
+  const count = PolicyGraph.incoming(state.policy, node.id).length;
+  $("#delete-module-detail").textContent = `Eliminar «${node.label}» del borrador. Tiene ${count} conexiones entrantes.`;
+  $("#replacement-root-field").hidden = state.policy.root_node !== node.id;
+  const select = $("#replacement-root");
+  select.replaceChildren(new Option("Elegí el nuevo inicio", ""));
+  Object.values(state.policy.nodes).filter((n) => n.id !== node.id).forEach((n) => select.add(new Option(n.label, n.id)));
+  select.required = state.policy.root_node === node.id;
+  $("#delete-module-dialog").showModal();
+});
+$("#delete-module-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  if (changeStructure((policy) => {
+    PolicyGraph.remove(policy, state.selected, $("#replacement-root").value || null);
+    return policy.root_node;
+  })) $("#delete-module-dialog").close();
+});
+$("#discard-draft").addEventListener("click", () => $("#discard-dialog").showModal());
+$("#confirm-discard").addEventListener("click", () => {
+  if (editorLocked()) return;
+  state.policy = structuredClone(state.savedPolicy);
+  state.editorDraft = structuredClone(state.policy);
+  state.editorDirty = false;
+  state.connecting = null;
+  selectNode(state.policy.nodes[state.selected] ? state.selected : state.policy.root_node);
+  resetDraftHistory();
+  $("#discard-dialog").close();
+});
+$$('[data-close-dialog]').forEach((button) => button.addEventListener("click", () => $(`#${button.dataset.closeDialog}`).close()));
+window.addEventListener("beforeunload", (event) => {
+  if (state.editorDirty) { event.preventDefault(); event.returnValue = ""; }
+});
+
+function focusSelectedNode() {
+  const node = [...$("#tree-nodes").querySelectorAll(".tree-node")].find((item) => item.dataset.nodeId === state.selected);
+  if (!node) return;
+  const viewport = $("#tree-viewport");
+  viewportState.x = viewport.clientWidth / 2 - (Number.parseFloat(node.style.left) + NODE_WIDTH / 2) * viewportState.scale;
+  viewportState.y = viewport.clientHeight / 2 - (Number.parseFloat(node.style.top) + NODE_HEIGHT / 2) * viewportState.scale;
+  viewportState.initialized = true;
+  applyViewportTransform();
+}
 
 function updateMetrics(data) {
   const total = data.total || 0;
@@ -457,7 +796,7 @@ function syncVersionUi() {
 
 function syncEditorLock() {
   const isProductive = state.editingVersion === state.activeVersion;
-  const locked = state.mode === "impact" || isProductive;
+  const locked = editorLocked();
   $$("#node-form input, #node-form select, #node-form button").forEach((control) => {
     control.disabled = locked || Boolean(control.closest("[hidden]"));
   });
@@ -468,6 +807,14 @@ function syncEditorLock() {
     row.querySelector("legend").textContent = `Validación ${index + 1}`;
     row.querySelector(".remove-validation").disabled = locked || rows.length === 1;
   });
+  $$('[data-structure-control], .branch-port').forEach((control) => { control.disabled = locked; });
+  $("#set-root").disabled = locked || state.selected === state.policy?.root_node;
+  $("#delete-module").disabled = locked || Object.keys(state.policy?.nodes || {}).length <= 1;
+  $("#discard-draft").disabled = locked || !state.editorDirty;
+  $("#editor-version-select").disabled = state.saving || state.editorLoading;
+  $("#publish-button").disabled = state.saving || state.editorLoading;
+  $("#add-module").hidden = state.mode !== "edit";
+  syncDraftUi();
   $('#node-combination option[value="none"]').disabled = rows.length > 1;
   $("#combination-help").textContent = combination === "none"
     ? "Una sola validación. Elegí AND u OR para agregar más."
@@ -479,7 +826,7 @@ function syncEditorLock() {
   guidance.classList.toggle("locked", isProductive);
   guidance.innerHTML = isProductive
     ? "<strong>Versión productiva protegida</strong><span>Podés inspeccionarla o crear una candidata a partir de ella, pero no modificarla.</span>"
-    : "<strong>Candidata editable</strong><span>Aplicar guarda el cambio en esta versión. Producción no se modifica.</span>";
+    : "<strong>Candidata editable</strong><span>Armá módulos y conexiones; Guardar política conserva el árbol completo.</span>";
 }
 
 function renderVersionLibrary() {
@@ -521,16 +868,30 @@ async function loadVersions({ evaluationVersion = null, editingVersion = state.e
 }
 
 async function loadEditorVersion(version) {
-  state.policy = await api(`/api/policies/${encodeURIComponent(version)}`);
-  state.editingVersion = version;
-  state.selected = state.policy.root_node;
-  state.editorDraft = structuredClone(state.policy);
-  state.editorSelected = state.selected;
-  window.localStorage.setItem("credit-policy-editor-version", version);
-  $("#editor-version-select").value = version;
-  viewportState.initialized = false;
-  selectNode(state.selected);
-  syncVersionUi();
+  if (!canLeaveEditor()) { $("#editor-version-select").value = state.editingVersion; return false; }
+  state.editorLoading = true;
+  syncEditorLock();
+  try {
+    state.policy = await api(`/api/policies/${encodeURIComponent(version)}`);
+    state.editingVersion = version;
+    state.selected = state.policy.root_node;
+    state.editorDraft = structuredClone(state.policy);
+    state.editorSelected = state.selected;
+    state.savedPolicy = structuredClone(state.policy);
+    state.editorDirty = false;
+    state.connecting = null;
+    window.localStorage.setItem("credit-policy-editor-version", version);
+    $("#editor-version-select").value = version;
+    viewportState.initialized = false;
+    selectNode(state.selected);
+    resetDraftHistory();
+    syncVersionUi();
+    return true;
+  } finally {
+    state.editorLoading = false;
+    $("#editor-version-select").value = state.editingVersion;
+    syncEditorLock();
+  }
 }
 
 async function loadPolicyVersion(version, policySha256 = null, loadHistory = true) {
@@ -581,23 +942,16 @@ async function initialize() {
 
 $("#node-form").addEventListener("submit", async (event) => {
   event.preventDefault();
-  if (state.editingVersion === state.activeVersion) {
+  if (editorLocked()) {
     toast("La versión productiva es de solo lectura", true);
     return;
   }
+  if (!readyToSave()) return;
   const policy = structuredClone(state.policy);
-  const node = policy.nodes[state.selected]; node.label = $("#node-label").value.trim();
-  if (node.type === "condition") {
-    try { node.validations = readValidations(); }
-    catch (error) { toast(error.message, true); return; }
-    node.combination = $("#node-combination").value;
-    delete node.field;
-    delete node.operator;
-    delete node.value;
-  }
-  else { node.decision = $("#node-decision").value; node.risk_band = $("#node-band").value; node.credit_limit = Number($("#node-limit").value); }
+  const node = policy.nodes[state.selected];
   const button = $(".apply-button");
-  button.disabled = true;
+  state.saving = true;
+  syncEditorLock();
   button.textContent = "Guardando…";
   try {
     await api(`/api/policies/${encodeURIComponent(state.editingVersion)}`, {
@@ -605,25 +959,32 @@ $("#node-form").addEventListener("submit", async (event) => {
       body: JSON.stringify({ policy }),
     });
     state.policy = policy;
+    state.savedPolicy = structuredClone(policy);
+    state.editorDirty = false;
+    state.connecting = null;
     state.editorDraft = structuredClone(policy);
     state.editorSelected = node.id;
     selectNode(node.id);
+    resetDraftHistory();
     await loadVersions({ editingVersion: state.editingVersion });
     toast(`Cambio guardado en la candidata ${state.editingVersion}`);
   } catch (error) {
     toast(`No se pudo guardar el cambio: ${error.message}`, true);
   } finally {
-    button.textContent = "Aplicar cambios";
+    state.saving = false;
+    button.textContent = "Guardar política";
     syncEditorLock();
   }
 });
 
 $("#validate-button").addEventListener("click", async () => {
+  if (state.saving || !readyToSave()) return;
   try { const result = await api("/api/policies/validate", { method: "POST", body: JSON.stringify({ policy: state.policy }) }); toast(`Política válida · ${result.nodes} nodos`); }
   catch (error) { toast(`No es válida: ${error.message}`, true); }
 });
 
 function openNewVersionDialog() {
+  if (state.saving || !readyToSave()) return;
   $("#publish-version").value = "";
   $("#publish-author").value = state.policy.metadata.created_by;
   $("#publish-dialog").showModal();
@@ -635,21 +996,32 @@ $("#publish-button").addEventListener("click", () => {
 
 $("#publish-form").addEventListener("submit", async (event) => {
   if (event.submitter?.value === "cancel") return;
-  event.preventDefault(); const policy = structuredClone(state.policy);
+  event.preventDefault();
+  if (state.saving || !readyToSave()) return;
+  const policy = structuredClone(state.policy);
   policy.metadata.version = $("#publish-version").value.trim(); policy.metadata.created_by = $("#publish-author").value.trim(); policy.metadata.created_at = new Date().toISOString(); policy.metadata.status = "draft";
+  state.saving = true;
+  $("#confirm-publish").disabled = true;
+  syncEditorLock();
   try {
     await api("/api/policies/publish", { method: "POST", body: JSON.stringify({ policy }) });
     state.policy = policy;
     state.editingVersion = policy.metadata.version;
     state.editorDraft = structuredClone(policy);
     state.editorSelected = state.selected;
+    state.savedPolicy = structuredClone(policy);
+    state.editorDirty = false;
+    state.connecting = null;
     window.localStorage.setItem("credit-policy-editor-version", policy.metadata.version);
+    resetDraftHistory();
     await loadVersions({ evaluationVersion: policy.metadata.version, editingVersion: policy.metadata.version });
     $("#publish-dialog").close(); renderTree(); toast(`Versión ${policy.metadata.version} creada · producción no cambió`);
   } catch (error) { toast(`No se pudo crear la versión: ${error.message}`, true); }
+  finally { state.saving = false; $("#confirm-publish").disabled = false; syncEditorLock(); }
 });
 
 async function executeEvaluation() {
+  if (!canLeaveEditor()) return;
   setEvaluationState("starting");
   await new Promise((resolve) => window.requestAnimationFrame(resolve));
   try {
@@ -674,6 +1046,8 @@ $("#run-button").addEventListener("click", executeEvaluation);
 
 async function setMode(mode) {
   if (mode === state.mode) return;
+  if (!canLeaveEditor()) return;
+  state.connecting = null;
   if (state.mode === "edit" && mode === "impact") {
     state.editorDraft = structuredClone(state.policy);
     state.editorSelected = state.selected;
@@ -686,7 +1060,7 @@ async function setMode(mode) {
   $("#view-title").textContent = mode === "impact" ? "Laboratorio de evaluación" : "Crédito de consumo";
   $("#canvas-subtitle").textContent = mode === "impact"
     ? "El volumen muestra por dónde recorrieron la política los usuarios analizados."
-    : "Seleccioná un nodo para editar su regla.";
+    : "Agregá módulos y conectá las ramas Sí y No.";
   if (mode === "impact") {
     const evaluationVersion = $("#version-select").value || state.activeVersion;
     await loadPolicyVersion(evaluationVersion);
@@ -741,6 +1115,7 @@ $("#run-select").addEventListener("change", async (event) => {
 });
 
 function openPromotion(version) {
+  if (!canLeaveEditor()) return;
   state.pendingPromotionVersion = version;
   $("#promote-version").textContent = version;
   $("#promote-dialog").showModal();
@@ -803,6 +1178,7 @@ function registerWebMcp() {
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     annotations: { readOnlyHint: true, untrustedContentHint: false },
     async execute() {
+      if (state.saving || !readyToSave()) throw new Error("El borrador tiene pendientes.");
       const result = await api("/api/policies/validate", { method: "POST", body: JSON.stringify({ policy: state.policy }) });
       toast(`Política válida · ${result.nodes} nodos`);
       return result;
@@ -815,6 +1191,7 @@ function registerWebMcp() {
     inputSchema: { type: "object", properties: { limit: { type: "integer", minimum: 1, maximum: 10000 } }, required: ["limit"], additionalProperties: false },
     annotations: { readOnlyHint: false, untrustedContentHint: false },
     async execute({ limit }) {
+      if (!canLeaveEditor()) throw new Error("Guardá o descartá el borrador antes de evaluar.");
       const result = await api("/api/runs", { method: "POST", body: JSON.stringify({ instances: [{}], parameters: { limit, policy_version: state.policy.metadata.version } }) });
       await loadRuns(result.policy_version, result.run_id);
       toast(`${result.processed_rows} usuarios · política ${result.policy_version}`);
